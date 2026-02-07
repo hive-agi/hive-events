@@ -1,6 +1,7 @@
 {:paths ["src"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
-        org.clojure/core.async {:mvn/version "1.6.681"}}
+        org.clojure/core.async {:mvn/version "1.6.681"}
+        org.babashka/sci {:mvn/version "0.3.2"}}
 
  :aliases
  {:dev {:extra-paths ["dev" "test"]

@@ -31,7 +31,8 @@
   (:require [hive.events.interceptor :as interceptor]
             [hive.events.fx :as fx]
             [hive.events.cofx :as cofx]
-            [hive.events.router :as router]))
+            [hive.events.router :as router]
+            [hive.events.fsm :as fsm]))
 
 ;; Re-export core API
 (def ->interceptor interceptor/->interceptor)
@@ -53,3 +54,9 @@
 ;; Built-in interceptors
 (def debug interceptor/debug)
 (def trim-v interceptor/trim-v)
+
+;; FSM workflow engine (L2 deterministic workflows)
+(def fsm-compile fsm/compile)
+(def fsm-run fsm/run)
+#?(:clj (def fsm-run-async fsm/run-async))
+(def fsm-step fsm/step)
