@@ -1,7 +1,8 @@
 (ns hive.events.fsm-test
   "Tests for the FSM workflow engine."
   (:require [clojure.test :refer [deftest is testing]]
-            [hive.events.fsm :as fsm]))
+            [hive.events.fsm :as fsm]
+            [hive.events.fx :as fx]))
 
 (deftest simple-counter-fsm
   (testing "FSM that counts to 4 and returns"
@@ -122,3 +123,118 @@
                      (fsm/run))]
       (is (true? (:done result)))
       (is (pos? (count @hook-log))))))
+
+;; =============================================================================
+;; FX Integration Tests
+;; =============================================================================
+
+(deftest fsm-handler-returns-fx
+  (testing "Handler returning {:data ..., :fx [...]} processes effects"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          result (-> (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        {:data (assoc data :processed true)
+                                                         :fx   [[:test-log {:msg "handler fired"}]]})
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+                     (fsm/run))]
+      (is (true? (:processed result)) "Data should be extracted from :data key")
+      (is (= 1 (count @fx-log)) "One effect should have been processed")
+      (is (= {:msg "handler fired"} (first @fx-log)) "Effect value should match")
+      (fx/clear-fx :test-log))))
+
+(deftest fsm-handler-returns-plain-data-backward-compat
+  (testing "Handler returning plain data still works (backward compatibility)"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          result (-> (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        (assoc data :plain true))
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+                     (fsm/run))]
+      (is (true? (:plain result)) "Plain data should work as before")
+      (is (empty? @fx-log) "No effects should fire for plain data handlers")
+      (fx/clear-fx :test-log))))
+
+(deftest fsm-handler-fx-multiple-effects
+  (testing "Handler can return multiple effects in order"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          result (-> (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        {:data (assoc data :done true)
+                                                         :fx   [[:test-log :first]
+                                                                [:test-log :second]
+                                                                [:test-log :third]]})
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+                     (fsm/run))]
+      (is (true? (:done result)))
+      (is (= [:first :second :third] @fx-log) "Effects should fire in order, including duplicates")
+      (fx/clear-fx :test-log))))
+
+(deftest fsm-handler-fx-across-states
+  (testing "Effects fire correctly across multiple state transitions"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          result (-> (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        {:data (assoc data :phase :started)
+                                                         :fx   [[:test-log :start-fx]]})
+                                          :dispatches [[:process (constantly true)]]}
+                             :process    {:handler    (fn [_r data]
+                                                        {:data (assoc data :phase :processed)
+                                                         :fx   [[:test-log :process-fx]]})
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+                     (fsm/run))]
+      (is (= :processed (:phase result)))
+      (is (= [:start-fx :process-fx] @fx-log) "Effects from each state should fire in order")
+      (fx/clear-fx :test-log))))
+
+(deftest fsm-handler-fx-mixed-with-plain
+  (testing "Mix of fx-returning and plain-data handlers works"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          result (-> (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        ;; Plain data - no fx
+                                                        (assoc data :step 1))
+                                          :dispatches [[:step2 (constantly true)]]}
+                             :step2      {:handler    (fn [_r data]
+                                                        ;; FX-enhanced
+                                                        {:data (assoc data :step 2)
+                                                         :fx   [[:test-log :from-step2]]})
+                                          :dispatches [[:step3 (constantly true)]]}
+                             :step3      {:handler    (fn [_r data]
+                                                        ;; Plain data again
+                                                        (assoc data :step 3))
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+                     (fsm/run))]
+      (is (= 3 (:step result)))
+      (is (= [:from-step2] @fx-log) "Only step2 should produce effects")
+      (fx/clear-fx :test-log))))
+
+(deftest fsm-handler-fx-empty-vector
+  (testing "Handler returning {:data ..., :fx []} is valid (no effects)"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          result (-> (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        {:data (assoc data :done true)
+                                                         :fx   []})
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+                     (fsm/run))]
+      (is (true? (:done result)))
+      (is (empty? @fx-log) "Empty fx vector should not trigger any effects")
+      (fx/clear-fx :test-log))))
+
+(deftest fsm-handler-fx-data-with-fx-key-no-conflict
+  (testing "Plain data map containing :fx key (non-sequential) is treated as plain data"
+    ;; Edge case: handler returns {:fx "some-string", :other "val"}
+    ;; Since :fx is not sequential, this is plain data, not an fx-enhanced result.
+    (let [result (-> (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        (assoc data :fx "not-effects" :done true))
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+                     (fsm/run))]
+      (is (true? (:done result)))
+      (is (= "not-effects" (:fx result)) "Plain :fx value should pass through"))))

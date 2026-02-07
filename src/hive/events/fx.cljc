@@ -80,6 +80,30 @@
         #?(:clj (println "[hive.events] Warning: no fx handler for" effect-id)
            :cljs (js/console.warn "[hive.events] Warning: no fx handler for" effect-id))))))
 
+(defn do-fx-seq
+  "Execute effects from a sequential collection of [effect-id value] tuples.
+
+   Unlike `do-fx` (which takes a map), this preserves ordering and allows
+   the same effect-id to appear multiple times.
+
+   Used by the FSM engine when handlers return `{:data ... :fx [...]}`.
+
+   Example:
+     (do-fx-seq [[:log {:msg \"starting\"}]
+                  [:http {:url \"/api\"}]
+                  [:log {:msg \"done\"}]])"
+  [effects]
+  (when (sequential? effects)
+    (doseq [[effect-id effect-value] effects]
+      (if-let [handler (get-fx effect-id)]
+        (try
+          (handler effect-value)
+          (catch #?(:clj Exception :cljs :default) e
+            #?(:clj (println "[hive.events] Error in fx handler" effect-id e)
+               :cljs (js/console.error "[hive.events] Error in fx handler" effect-id e))))
+        #?(:clj (println "[hive.events] Warning: no fx handler for" effect-id)
+           :cljs (js/console.warn "[hive.events] Warning: no fx handler for" effect-id))))))
+
 ;; =============================================================================
 ;; Built-in Effects
 

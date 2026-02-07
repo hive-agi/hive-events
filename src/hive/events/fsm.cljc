@@ -33,14 +33,19 @@
 
    ## Integration with hive-events
    - Handlers are pure: `(fn [resources data] new-data)`
+   - Handlers may return fx-enhanced results:
+     `(fn [resources data] {:data new-data, :fx [[:effect-id params]]})`
+     Effects are processed through the hive.events.fx pipeline after transition.
    - Subscriptions can dispatch events on state path changes
    - Pre/post hooks for interceptor-style concerns
    - EDN specs compiled with SCI
 
    Based on yogthos/maestro v0.2.1 (MIT License)."
   (:refer-clojure :exclude [compile])
-  #?(:clj (:require [sci.core :as sci])
-     :cljs (:require [sci.core :as sci])))
+  #?(:clj (:require [sci.core :as sci]
+                    [hive.events.fx :as fx])
+     :cljs (:require [sci.core :as sci]
+                     [hive.events.fx :as fx])))
 
 ;; =============================================================================
 ;; Defaults
@@ -218,6 +223,32 @@
                        :data             data})))))
 
 ;; =============================================================================
+;; FX Integration
+;; =============================================================================
+
+(defn- fx-result?
+  "Check if a handler result is an fx-enhanced result map.
+   Returns true if result is a map with a sequential :fx key.
+
+   Handlers can return either:
+   - Plain data (backward compatible): `{:count 1, :status :ok}`
+   - FX-enhanced result: `{:data {:count 1}, :fx [[:log {:msg \"done\"}]]}`"
+  [result]
+  (and (map? result)
+       (contains? result :fx)
+       (sequential? (:fx result))))
+
+(defn- extract-handler-result
+  "Extract data and effects from a handler result.
+
+   If fx-enhanced: returns [data effects-vec]
+   If plain data:  returns [data nil]"
+  [result]
+  (if (fx-result? result)
+    [(:data result) (:fx result)]
+    [result nil]))
+
+;; =============================================================================
 ;; Run
 ;; =============================================================================
 
@@ -287,7 +318,7 @@
 
            ;; Normal state — run handler, transition, recur
            :else
-           (let [new-data (try
+           (let [result   (try
                             (handler resources data
                                      identity  ;; callback (sync path)
                                      (fn [err] (throw err)))
@@ -297,6 +328,8 @@
                                               {:current-state-id current-state-id
                                                :data             data
                                                :error            ex}))))
+                 ;; Support fx-enhanced results: {:data new-data, :fx [[:effect-id params]]}
+                 [new-data effects] (extract-handler-result result)
                  next-fsm (try
                             (transition fsm dispatches new-data post resources)
                             (catch #?(:clj Exception :cljs :default) ex
@@ -306,6 +339,9 @@
                                           {:state-id current-state-id :status :error})
                                   (assoc :current-state-id ::error
                                          :error ex))))]
+             ;; Process effects after successful state transition
+             (when effects
+               (fx/do-fx-seq effects))
              (recur (pre next-fsm resources)))))))))
 
 ;; =============================================================================
@@ -341,7 +377,11 @@
   (let [{:keys [handler dispatches]} (get fsm current-state-id)]
     (when-not handler
       (throw (ex-info "no handler for state" {:state current-state-id})))
-    (let [new-data (handler resources data identity (fn [e] (throw e)))]
-      (transition (assoc halted-fsm :fsm fsm)
-                  dispatches new-data
-                  identity resources))))
+    (let [result   (handler resources data identity (fn [e] (throw e)))
+          [new-data effects] (extract-handler-result result)
+          next-fsm (transition (assoc halted-fsm :fsm fsm)
+                               dispatches new-data
+                               identity resources)]
+      (when effects
+        (fx/do-fx-seq effects))
+      next-fsm)))
