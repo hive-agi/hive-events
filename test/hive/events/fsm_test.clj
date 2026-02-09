@@ -238,3 +238,350 @@
                      (fsm/run))]
       (is (true? (:done result)))
       (is (= "not-effects" (:fx result)) "Plain :fx value should pass through"))))
+
+;; =============================================================================
+;; Sub-FSM Composition Tests
+;; =============================================================================
+
+(deftest sub-fsm-basic-composition
+  (testing "run-sub-fsm executes child FSM and returns result"
+    (let [child (fsm/compile
+                 {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                   (assoc data :child-value (* (:input data) 10)))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run-sub-fsm child {} {:input 5})]
+      (is (= 50 (:child-value result)))
+      (is (= 5 (:input result))))))
+
+(deftest sub-fsm-error-handling
+  (testing "run-sub-fsm catches child errors and returns error map"
+    (let [child (fsm/compile
+                 {:fsm {::fsm/start {:handler    (fn [_r _data]
+                                                   (throw (ex-info "child boom" {})))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run-sub-fsm child {} {})]
+      (is (fsm/sub-fsm-error? result))
+      (is (string? (:sub-fsm/message result)))
+      (is (some? (:sub-fsm/cause result))))))
+
+(deftest sub-fsm-error-predicate
+  (testing "sub-fsm-error? returns false for normal results"
+    (is (not (fsm/sub-fsm-error? {:value 42})))
+    (is (not (fsm/sub-fsm-error? {})))
+    (is (not (fsm/sub-fsm-error? nil)))))
+
+(deftest sub-fsm-resource-sharing
+  (testing "run-sub-fsm passes resources to child"
+    (let [child (fsm/compile
+                 {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                   (assoc data :computed ((:compute resources) (:x data))))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run-sub-fsm child {:compute #(* % 3)} {:x 7})]
+      (is (= 21 (:computed result))))))
+
+(deftest sub-fsm-multi-state-child
+  (testing "run-sub-fsm works with multi-state child FSM"
+    (let [child (fsm/compile
+                 {:fsm {::fsm/start {:handler    (fn [_r data] (assoc data :phase :a))
+                                     :dispatches [[:step-b (constantly true)]]}
+                        :step-b     {:handler    (fn [_r data] (assoc data :phase :b :doubled (* 2 (:val data))))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run-sub-fsm child {} {:val 6})]
+      (is (= :b (:phase result)))
+      (is (= 12 (:doubled result))))))
+
+(deftest sub-fsm-nested-in-parent-handler
+  (testing "Parent handler calls run-sub-fsm and merges result"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :enriched (str "ctx-" (:id data))))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                    (let [ctx (fsm/run-sub-fsm child-fsm resources
+                                                                               {:id (:agent-id data)})]
+                                                      (assoc data :context ctx)))
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:agent-id "ling-1"}})]
+      (is (= "ling-1" (:agent-id result)))
+      (is (= "ctx-ling-1" (get-in result [:context :enriched]))))))
+
+(deftest sub-fsm-error-in-parent-handler
+  (testing "Parent handler gracefully handles sub-FSM error"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r _data]
+                                                       (throw (ex-info "sub-boom" {:reason :test})))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                    (let [result (fsm/run-sub-fsm child-fsm resources {})]
+                                                      (if (fsm/sub-fsm-error? result)
+                                                        (assoc data :error (:sub-fsm/message result))
+                                                        (merge data result))))
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:status :ok}})]
+      (is (= :ok (:status result)))
+      (is (string? (:error result))))))
+
+(deftest make-sub-fsm-handler-default-merge
+  (testing "make-sub-fsm-handler with default merge (shallow merge into parent)"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :child-key "from-child"))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler child-fsm)
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:parent-key "from-parent"}})]
+      (is (= "from-parent" (:parent-key result)))
+      (is (= "from-child" (:child-key result))))))
+
+(deftest make-sub-fsm-handler-result-key
+  (testing "make-sub-fsm-handler with :result-key stores child result under key"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :enriched true))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child-fsm
+                                                   {:result-key :child-output})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:parent-val 1}})]
+      (is (= 1 (:parent-val result)))
+      (is (true? (get-in result [:child-output :enriched]))))))
+
+(deftest make-sub-fsm-handler-data-fn
+  (testing "make-sub-fsm-handler with :data-fn selects child input"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :computed (* 2 (:x data))))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child-fsm
+                                                   {:data-fn    #(select-keys % [:x])
+                                                    :result-key :math})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:x 5 :y 10 :secret "hidden"}})]
+      (is (= 5 (:x result)))
+      (is (= 10 (:y result)))
+      (is (= "hidden" (:secret result)))
+      (is (= 10 (get-in result [:math :computed])))
+      ;; Child should NOT see :y or :secret
+      (is (nil? (get-in result [:math :y])))
+      (is (nil? (get-in result [:math :secret]))))))
+
+(deftest make-sub-fsm-handler-resources-fn
+  (testing "make-sub-fsm-handler with :resources-fn transforms resources for child"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                       (assoc data :result ((:child-fn resources) (:val data))))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child-fsm
+                                                   {:resources-fn (fn [r] {:child-fn (:parent-fn r)})
+                                                    :result-key   :child})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {:parent-fn inc} {:data {:val 41}})]
+      (is (= 42 (get-in result [:child :result]))))))
+
+(deftest make-sub-fsm-handler-error-propagation
+  (testing "make-sub-fsm-handler sets :error-key on child failure"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r _data]
+                                                       (throw (ex-info "child failed" {})))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child-fsm
+                                                   {:error-key :sub-error})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:status :ok}})]
+      (is (= :ok (:status result)))
+      (is (string? (:sub-error result))))))
+
+(deftest make-sub-fsm-handler-custom-merge-fn
+  (testing "make-sub-fsm-handler with custom :merge-fn"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :items [1 2 3]))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child-fsm
+                                                   {:merge-fn (fn [parent-data child-result]
+                                                                (update parent-data :all-items
+                                                                        (fnil into [])
+                                                                        (:items child-result)))})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:all-items [0]}})]
+      (is (= [0 1 2 3] (:all-items result))))))
+
+(deftest sub-fsm-deeply-nested
+  (testing "Three levels of FSM nesting works"
+    (let [grandchild (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        (assoc data :depth 3 :gc-val "deep"))
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+          child (fsm/compile
+                 {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                   (let [gc (fsm/run-sub-fsm grandchild resources {:input (:x data)})]
+                                                     (assoc data :depth 2 :grandchild gc)))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                    (let [c (fsm/run-sub-fsm child resources {:x (:val data)})]
+                                                      (assoc data :depth 1 :child c)))
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:val 42}})]
+      (is (= 1 (:depth result)))
+      (is (= 2 (get-in result [:child :depth])))
+      (is (= 3 (get-in result [:child :grandchild :depth])))
+      (is (= "deep" (get-in result [:child :grandchild :gc-val]))))))
+
+;; =============================================================================
+;; Sub-FSM FX-Aware Composition Tests
+;; =============================================================================
+
+(deftest sub-fsm-fx-captures-child-effects
+  (testing "run-sub-fsm-fx captures child FX without executing them"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          child  (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                    {:data (assoc data :processed true)
+                                                     :fx   [[:test-log :from-child]]})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run-sub-fsm-fx child {} {:input 1})]
+      ;; FX should be captured, not executed
+      (is (empty? @fx-log) "Child FX should NOT be executed")
+      (is (= [[:test-log :from-child]] (:fx result)) "FX should be captured in result")
+      (is (true? (get-in result [:data :processed])) "Child data should be returned")
+      (fx/clear-fx :test-log))))
+
+(deftest sub-fsm-fx-accumulates-across-states
+  (testing "run-sub-fsm-fx accumulates FX from multiple child states"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          child  (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                    {:data (assoc data :step 1)
+                                                     :fx   [[:test-log :step-1]]})
+                                      :dispatches [[:step2 (constantly true)]]}
+                         :step2      {:handler    (fn [_r data]
+                                                    {:data (assoc data :step 2)
+                                                     :fx   [[:test-log :step-2a]
+                                                            [:test-log :step-2b]]})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run-sub-fsm-fx child {} {})]
+      (is (empty? @fx-log) "No FX should be executed")
+      (is (= [[:test-log :step-1]
+              [:test-log :step-2a]
+              [:test-log :step-2b]]
+             (:fx result))
+          "All FX from all states should be accumulated in order")
+      (is (= 2 (get-in result [:data :step])))
+      (fx/clear-fx :test-log))))
+
+(deftest sub-fsm-fx-no-effects-returns-empty
+  (testing "run-sub-fsm-fx with plain-data handlers returns empty FX"
+    (let [child (fsm/compile
+                 {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                   (assoc data :done true))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run-sub-fsm-fx child {} {})]
+      (is (= [] (:fx result)) "FX should be empty vector")
+      (is (true? (get-in result [:data :done]))))))
+
+(deftest sub-fsm-fx-error-handling
+  (testing "run-sub-fsm-fx returns error map on child failure"
+    (let [child (fsm/compile
+                 {:fsm {::fsm/start {:handler    (fn [_r _data]
+                                                   (throw (ex-info "fx-boom" {})))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run-sub-fsm-fx child {} {})]
+      (is (fsm/sub-fsm-error? result))
+      ;; FSM engine wraps handler exceptions in "handler error" ex-info
+      (is (string? (:sub-fsm/message result)))
+      (is (some? (:sub-fsm/cause result))))))
+
+(deftest sub-fsm-fx-parent-surfaces-child-fx
+  (testing "Parent handler uses run-sub-fsm-fx to surface child FX"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          child  (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                    {:data (assoc data :child-done true)
+                                                     :fx   [[:test-log :child-fx]]})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                    (let [{child-data :data child-fx :fx}
+                                                          (fsm/run-sub-fsm-fx child resources
+                                                                              (select-keys data [:input]))]
+                                                      {:data (assoc data :context child-data)
+                                                       :fx (into [[:test-log :parent-fx]] child-fx)}))
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:input 42}})]
+      ;; Parent's FX pipeline should execute BOTH parent and surfaced child FX
+      (is (= [:parent-fx :child-fx] @fx-log)
+          "Parent FX first, then surfaced child FX")
+      (is (true? (get-in result [:context :child-done])))
+      (fx/clear-fx :test-log))))
+
+(deftest make-sub-fsm-handler-fx-mode
+  (testing "make-sub-fsm-handler with :fx? true surfaces child effects"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          child  (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                    {:data (assoc data :enriched true)
+                                                     :fx   [[:test-log :from-child]]})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child
+                                                   {:result-key :child
+                                                    :fx?        true})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:parent-val 1}})]
+      ;; The child FX should be surfaced to parent pipeline and executed
+      (is (= [:from-child] @fx-log)
+          "Child FX should be executed via parent pipeline")
+      (is (= 1 (:parent-val result)))
+      (is (true? (get-in result [:child :enriched])))
+      (fx/clear-fx :test-log))))
+
+(deftest make-sub-fsm-handler-fx-mode-no-effects
+  (testing "make-sub-fsm-handler with :fx? true but no child effects returns plain data"
+    (let [child (fsm/compile
+                 {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                   (assoc data :plain true))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child
+                                                   {:result-key :child
+                                                    :fx?        true})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:x 1}})]
+      (is (= 1 (:x result)))
+      (is (true? (get-in result [:child :plain]))))))
+
+(deftest make-sub-fsm-handler-fx-mode-error
+  (testing "make-sub-fsm-handler with :fx? true handles child error"
+    (let [child (fsm/compile
+                 {:fsm {::fsm/start {:handler    (fn [_r _data]
+                                                   (throw (ex-info "fx-child-error" {})))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child
+                                                   {:fx?       true
+                                                    :error-key :sub-err})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:status :ok}})]
+      (is (= :ok (:status result)))
+      (is (string? (:sub-err result))))))

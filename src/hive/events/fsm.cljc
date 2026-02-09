@@ -39,6 +39,7 @@
    - Subscriptions can dispatch events on state path changes
    - Pre/post hooks for interceptor-style concerns
    - EDN specs compiled with SCI
+   - Sub-FSM composition via `run-sub-fsm` and `make-sub-fsm-handler`
 
    Based on yogthos/maestro v0.2.1 (MIT License)."
   (:refer-clojure :exclude [compile])
@@ -385,3 +386,163 @@
       (when effects
         (fx/do-fx-seq effects))
       next-fsm)))
+
+;; =============================================================================
+;; Sub-FSM Composition
+;; =============================================================================
+
+(defn run-sub-fsm
+  "Execute a compiled sub-FSM within a parent handler context.
+
+   Runs the child FSM to completion and returns its result data,
+   which the parent handler can merge into its own data map.
+
+   Args:
+     compiled-child — Compiled FSM (from `compile`)
+     resources      — Resources map (shared or child-specific)
+     initial-data   — Initial data for the child FSM
+
+   Returns:
+     The child FSM result (final data map on ::end).
+
+   Error handling:
+     Catches child FSM exceptions and returns an error map:
+     `{:sub-fsm/error true :sub-fsm/message str :sub-fsm/cause ex}`
+     This lets the parent handler decide how to handle child failures
+     without crashing the parent FSM.
+
+   Example:
+     ```clojure
+     (defn handle-with-context [resources data]
+       (let [ctx-result (run-sub-fsm compiled-context-fsm
+                                     resources
+                                     (select-keys data [:agent-id :directory]))]
+         (if (:sub-fsm/error ctx-result)
+           (assoc data :error (:sub-fsm/message ctx-result))
+           (merge data ctx-result))))
+     ```"
+  [compiled-child resources initial-data]
+  (try
+    (run compiled-child resources {:data initial-data})
+    (catch #?(:clj Exception :cljs :default) ex
+      {:sub-fsm/error   true
+       :sub-fsm/message (#?(:clj ex-message :cljs .-message) ex)
+       :sub-fsm/cause   ex})))
+
+(defn run-sub-fsm-fx
+  "Execute a compiled sub-FSM and return both data and accumulated effects.
+
+   Like `run-sub-fsm` but captures FX from child handlers instead of
+   executing them immediately. The parent handler can then include these
+   effects in its own `:fx` vector, surfacing them to the parent FSM's
+   FX pipeline.
+
+   This is essential for composability — child FSMs should not execute
+   side effects independently when embedded in a parent context. The
+   parent must control effect execution order.
+
+   Args:
+     compiled-child — Compiled FSM (from `compile`)
+     resources      — Resources map (shared or child-specific)
+     initial-data   — Initial data for the child FSM
+
+   Returns:
+     `{:data result-data, :fx [...]}` — child data + accumulated effects.
+     On error: `{:sub-fsm/error true, :sub-fsm/message str, :sub-fsm/cause ex}`
+
+   Example:
+     ```clojure
+     (defn handle-with-effects [resources data]
+       (let [{child-data :data child-fx :fx :as result}
+             (run-sub-fsm-fx compiled-child resources
+                             (select-keys data [:input]))]
+         (if (sub-fsm-error? result)
+           (assoc data :error (:sub-fsm/message result))
+           {:data (merge data child-data)
+            :fx (vec child-fx)})))
+     ```"
+  [compiled-child resources initial-data]
+  (let [fx-acc (atom [])]
+    (try
+      (with-redefs [fx/do-fx-seq (fn [effects]
+                                   (when (sequential? effects)
+                                     (swap! fx-acc into effects)))]
+        (let [result (run compiled-child resources {:data initial-data})]
+          {:data result
+           :fx   (vec @fx-acc)}))
+      (catch #?(:clj Exception :cljs :default) ex
+        {:sub-fsm/error   true
+         :sub-fsm/message (#?(:clj ex-message :cljs .-message) ex)
+         :sub-fsm/cause   ex}))))
+
+(defn sub-fsm-error?
+  "Check if a sub-FSM result is an error map (from run-sub-fsm)."
+  [result]
+  (true? (:sub-fsm/error result)))
+
+(defn make-sub-fsm-handler
+  "Create a parent FSM handler that delegates to a compiled sub-FSM.
+
+   The returned handler:
+   1. Extracts child initial data from parent data via `data-fn`
+   2. Runs the child FSM via `run-sub-fsm`
+   3. Merges child result into parent data via `merge-fn`
+
+   Args:
+     compiled-child — Compiled child FSM
+     opts           — Options map:
+       :data-fn     — (fn [parent-data] child-initial-data)
+                      Default: identity (pass full parent data)
+       :merge-fn    — (fn [parent-data child-result] merged-data)
+                      Default: merge (shallow merge child into parent)
+       :result-key  — If provided, assoc child result under this key
+                      instead of using merge-fn (convenience shorthand)
+       :resources-fn — (fn [parent-resources] child-resources)
+                       Default: identity (share parent resources)
+       :error-key   — Key to store error message when sub-FSM fails
+                      Default: :error
+
+   Returns:
+     (fn [resources data] data') — a standard FSM handler.
+
+   Example:
+     ```clojure
+     ;; Delegate to context-gather sub-FSM, store under :context
+     (def my-spec
+       {:fsm {::fsm/start
+              {:handler (make-sub-fsm-handler
+                          compiled-context-gather
+                          {:data-fn    #(select-keys % [:agent-id :directory])
+                           :result-key :context})
+               :dispatches [[::next (constantly true)]]}}})
+     ```"
+  ([compiled-child]
+   (make-sub-fsm-handler compiled-child {}))
+  ([compiled-child {:keys [data-fn merge-fn result-key resources-fn error-key fx?]
+                    :or   {data-fn      identity
+                           merge-fn     merge
+                           resources-fn identity
+                           error-key    :error
+                           fx?          false}}]
+   (fn [resources data]
+     (let [child-data      (data-fn data)
+           child-resources (resources-fn resources)
+           result          (if fx?
+                             (run-sub-fsm-fx compiled-child child-resources child-data)
+                             (run-sub-fsm compiled-child child-resources child-data))]
+       (if (sub-fsm-error? result)
+         (assoc data error-key (:sub-fsm/message result))
+         (if fx?
+           ;; FX mode: return {:data ..., :fx [...]} for parent FSM pipeline
+           (let [child-result (:data result)
+                 child-fx     (:fx result)
+                 merged       (if result-key
+                                (assoc data result-key child-result)
+                                (merge-fn data child-result))]
+             (if (seq child-fx)
+               {:data merged :fx child-fx}
+               merged))
+           ;; Non-FX mode: plain data merge
+           (if result-key
+             (assoc data result-key result)
+             (merge-fn data result))))))))

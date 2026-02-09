@@ -32,7 +32,8 @@
             [hive.events.fx :as fx]
             [hive.events.cofx :as cofx]
             [hive.events.router :as router]
-            [hive.events.fsm :as fsm]))
+            [hive.events.fsm :as fsm]
+            [hive.events.multi :as multi]))
 
 ;; Re-export core API
 (def ->interceptor interceptor/->interceptor)
@@ -55,8 +56,20 @@
 (def debug interceptor/debug)
 (def trim-v interceptor/trim-v)
 
+;; Multimethod-based dispatch (open extension)
+(def register-handler! multi/register-handler!)
+(def remove-handler! multi/remove-handler!)
+(def dispatch-multi multi/dispatch-sync)
+(def handler-registered? multi/handler-registered?)
+
 ;; FSM workflow engine (L2 deterministic workflows)
 (def fsm-compile fsm/compile)
 (def fsm-run fsm/run)
 #?(:clj (def fsm-run-async fsm/run-async))
 (def fsm-step fsm/step)
+
+;; FSM sub-FSM composition (nested workflows)
+(def fsm-run-sub fsm/run-sub-fsm)
+(def fsm-run-sub-fx fsm/run-sub-fsm-fx)
+(def fsm-sub-error? fsm/sub-fsm-error?)
+(def fsm-make-sub-handler fsm/make-sub-fsm-handler)
