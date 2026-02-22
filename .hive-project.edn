@@ -1,3 +1,5 @@
 {:project-id "hive-events"
  :parent "hive"
- :description "FSM + FX event system for workflow orchestration"}
+ :description "Event system for hive ecosystem"
+ :language :clojure
+ :tags ["events" "messaging"]}

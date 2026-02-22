@@ -31,6 +31,7 @@
   (:require [hive.events.interceptor :as interceptor]
             [hive.events.fx :as fx]
             [hive.events.cofx :as cofx]
+            [hive.events.log :as log]
             #?(:clj [clojure.core.async :as async :refer [go go-loop <! >! chan]])))
 
 ;; =============================================================================
@@ -39,7 +40,7 @@
 (defonce ^:private app-db (atom {}))
 (defonce ^:private event-registry (atom {}))
 
-#?(:clj (defonce ^:private event-queue (chan 1024)))
+#?(:clj (defonce ^:private event-queue (atom (chan 1024))))
 #?(:clj (defonce ^:private processing? (atom false)))
 
 ;; Forward declaration for dispatch-impl registration
@@ -145,8 +146,7 @@
         (fx/do-fx (:effects context))
         context)
       (do
-        #?(:clj (println "[hive.events] Warning: no handler for event" event-id)
-           :cljs (js/console.warn "[hive.events] Warning: no handler for event" event-id))
+        (log/warn "no handler for event" event-id)
         nil))))
 
 (defn dispatch-sync
@@ -162,13 +162,17 @@
      "Start the async event processing loop."
      []
      (when (compare-and-set! processing? false true)
-       (go-loop []
-         (when-let [event (<! event-queue)]
-           (try
-             (process-event event)
-             (catch Exception e
-               (println "[hive.events] Error processing event" (first event) e)))
-           (recur))))))
+       (let [q @event-queue]
+         (go-loop []
+           (if-let [event (<! q)]
+             (do
+               (try
+                 (process-event event)
+                 (catch Exception e
+                   (log/error "error processing event" (first event) e)))
+               (recur))
+             ;; Channel closed — mark processing as stopped
+             (reset! processing? false)))))))
 
 (defn dispatch
   "Dispatch event asynchronously.
@@ -178,7 +182,7 @@
   [event]
   #?(:clj (do
             (start-event-loop!)
-            (async/put! event-queue event))
+            (async/put! @event-queue event))
      :cljs (js/setTimeout #(process-event event) 0)))
 
 ;; =============================================================================
@@ -203,3 +207,16 @@
       Returns a channel with all contexts."
      [events]
      (async/merge (map dispatch-async events))))
+
+#?(:clj
+   (defn stop!
+     "Stop the event processing loop and reset the queue.
+
+      Closes the current event-queue channel (causing the go-loop to terminate),
+      creates a fresh channel, and resets the processing flag.
+
+      After calling stop!, you can restart by calling init! and dispatching events."
+     []
+     (when (compare-and-set! processing? true false)
+       (async/close! @event-queue))
+     (reset! event-queue (chan 1024))))

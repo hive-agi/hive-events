@@ -13,7 +13,8 @@
    - :effects   - output data (side effects to perform)
    - :queue     - interceptors yet to execute
    - :stack     - interceptors already executed (for :after phase)"
-  #?(:clj (:require [clojure.core.async :as async :refer [go <!]])))
+  (:require [hive.events.log :as log]
+            #?(:clj [clojure.core.async :as async :refer [go <!]])))
 
 (defn ->interceptor
   "Create an interceptor from components.
@@ -114,12 +115,10 @@
   (->interceptor
    :id :debug
    :before (fn [ctx]
-             #?(:clj (println "[event]" (get-in ctx [:coeffects :event]))
-                :cljs (js/console.log "[event]" (get-in ctx [:coeffects :event])))
+             (log/debug "event" (get-in ctx [:coeffects :event]))
              ctx)
    :after (fn [ctx]
-            #?(:clj (println "[effects]" (:effects ctx))
-               :cljs (js/console.log "[effects]" (:effects ctx)))
+            (log/debug "effects" (:effects ctx))
             ctx)))
 
 (def trim-v
@@ -141,7 +140,9 @@
    :id :path
    :before (fn [ctx]
              (let [db (get-in ctx [:coeffects :db])]
-               (assoc-in ctx [:coeffects :db] (get-in db p))))
+               (-> ctx
+                   (assoc-in [:coeffects :original-db] db)
+                   (assoc-in [:coeffects :db] (get-in db p)))))
    :after (fn [ctx]
             (let [original-db (get-in ctx [:coeffects :original-db])
                   new-value (get-in ctx [:effects :db])]

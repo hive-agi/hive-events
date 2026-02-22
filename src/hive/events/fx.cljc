@@ -23,9 +23,17 @@
      (reg-event-fx :user/login
        (fn [{:keys [db]} [_ credentials]]
          {:db (assoc db :loading? true)
-          :http {:method :post :url \"/api/login\" :body credentials}}))")
+          :http {:method :post :url \"/api/login\" :body credentials}}))"
+  (:require [hive.events.log :as log]))
 
 (defonce ^:private fx-registry (atom {}))
+
+(def ^:dynamic *fx-interceptor*
+  "Dynamic var for intercepting effect execution.
+   When bound to a function, `do-fx-seq` calls this instead of executing effects directly.
+   Used by `run-sub-fsm-fx` to capture child effects without executing them (thread-safe).
+   Default: nil (effects execute normally)."
+  nil)
 
 (defn reg-fx
   "Register an effect handler.
@@ -41,8 +49,7 @@
    - Return value is ignored"
   [id handler]
   (when-let [existing (get @fx-registry id)]
-    #?(:clj (println "[hive.events] Warning: overwriting fx handler" id)
-       :cljs (js/console.warn "[hive.events] Warning: overwriting fx handler" id)))
+    (log/warn "overwriting fx handler" id))
   (swap! fx-registry assoc id handler))
 
 (defn clear-fx
@@ -56,6 +63,18 @@
   "Get effect handler by id."
   [id]
   (get @fx-registry id))
+
+(defn- invoke-fx-handler
+  "Look up and invoke a registered fx handler for a single effect.
+   Logs warning if handler not found, catches and logs exceptions.
+   Shared by both `do-fx` (map) and `do-fx-seq` (sequential)."
+  [effect-id effect-value]
+  (if-let [handler (get-fx effect-id)]
+    (try
+      (handler effect-value)
+      (catch #?(:clj Exception :cljs :default) e
+        (log/error "error in fx handler" effect-id e)))
+    (log/warn "no fx handler for" effect-id)))
 
 (defn do-fx
   "Execute all effects in an effects map.
@@ -71,14 +90,7 @@
 
     ;; Process remaining effects
     (doseq [[effect-id effect-value] (dissoc effects :db)]
-      (if-let [handler (get-fx effect-id)]
-        (try
-          (handler effect-value)
-          (catch #?(:clj Exception :cljs :default) e
-            #?(:clj (println "[hive.events] Error in fx handler" effect-id e)
-               :cljs (js/console.error "[hive.events] Error in fx handler" effect-id e))))
-        #?(:clj (println "[hive.events] Warning: no fx handler for" effect-id)
-           :cljs (js/console.warn "[hive.events] Warning: no fx handler for" effect-id))))))
+      (invoke-fx-handler effect-id effect-value))))
 
 (defn do-fx-seq
   "Execute effects from a sequential collection of [effect-id value] tuples.
@@ -88,21 +100,19 @@
 
    Used by the FSM engine when handlers return `{:data ... :fx [...]}`.
 
+   When `*fx-interceptor*` is bound, delegates to it instead of executing
+   effects directly. This enables sub-FSM effect capture (thread-safe).
+
    Example:
      (do-fx-seq [[:log {:msg \"starting\"}]
                   [:http {:url \"/api\"}]
                   [:log {:msg \"done\"}]])"
   [effects]
   (when (sequential? effects)
-    (doseq [[effect-id effect-value] effects]
-      (if-let [handler (get-fx effect-id)]
-        (try
-          (handler effect-value)
-          (catch #?(:clj Exception :cljs :default) e
-            #?(:clj (println "[hive.events] Error in fx handler" effect-id e)
-               :cljs (js/console.error "[hive.events] Error in fx handler" effect-id e))))
-        #?(:clj (println "[hive.events] Warning: no fx handler for" effect-id)
-           :cljs (js/console.warn "[hive.events] Warning: no fx handler for" effect-id))))))
+    (if *fx-interceptor*
+      (*fx-interceptor* effects)
+      (doseq [[effect-id effect-value] effects]
+        (invoke-fx-handler effect-id effect-value)))))
 
 ;; =============================================================================
 ;; Built-in Effects

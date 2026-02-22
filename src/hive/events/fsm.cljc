@@ -464,9 +464,9 @@
   [compiled-child resources initial-data]
   (let [fx-acc (atom [])]
     (try
-      (with-redefs [fx/do-fx-seq (fn [effects]
-                                   (when (sequential? effects)
-                                     (swap! fx-acc into effects)))]
+      (binding [fx/*fx-interceptor* (fn [effects]
+                                      (when (sequential? effects)
+                                        (swap! fx-acc into effects)))]
         (let [result (run compiled-child resources {:data initial-data})]
           {:data result
            :fx   (vec @fx-acc)}))

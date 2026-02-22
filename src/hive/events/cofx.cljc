@@ -21,7 +21,8 @@
        [(inject-cofx :now)]
        (fn [{:keys [db now]} _]
          {:db (assoc db :last-timestamp now)}))"
-  (:require [hive.events.interceptor :as interceptor]))
+  (:require [hive.events.interceptor :as interceptor]
+            [hive.events.log :as log]))
 
 (defonce ^:private cofx-registry (atom {}))
 
@@ -38,8 +39,7 @@
    - Should be relatively fast (called during event processing)"
   [id handler]
   (when-let [existing (get @cofx-registry id)]
-    #?(:clj (println "[hive.events] Warning: overwriting cofx handler" id)
-       :cljs (js/console.warn "[hive.events] Warning: overwriting cofx handler" id)))
+    (log/warn "overwriting cofx handler" id))
   (swap! cofx-registry assoc id handler))
 
 (defn clear-cofx
@@ -75,8 +75,7 @@
                             (handler cofx value)
                             (handler cofx))))
                 (do
-                  #?(:clj (println "[hive.events] Warning: no cofx handler for" id)
-                     :cljs (js/console.warn "[hive.events] Warning: no cofx handler for" id))
+                  (log/warn "no cofx handler for" id)
                   context))))))
 
 ;; =============================================================================

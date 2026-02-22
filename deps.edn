@@ -1,7 +1,7 @@
 {:paths ["src"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/core.async {:mvn/version "1.6.681"}
-        org.babashka/sci {:mvn/version "0.3.2"}}
+        org.babashka/sci {:mvn/version "0.12.51"}}
 
  :aliases
  {:dev {:extra-paths ["dev" "test"]
@@ -13,5 +13,5 @@
          :main-opts ["-m" "cognitect.test-runner"]
          :exec-fn cognitect.test-runner.api/test}
 
-  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.9"}}
           :ns-default build}}}

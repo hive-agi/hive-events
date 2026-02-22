@@ -585,3 +585,418 @@
           result (fsm/run parent {} {:data {:status :ok}})]
       (is (= :ok (:status result)))
       (is (string? (:sub-err result))))))
+
+;; =============================================================================
+;; Parent FSM Orchestration Tests
+;; =============================================================================
+
+(deftest parent-multi-state-with-sub-fsm-at-mid-state
+  (testing "Parent FSM invokes sub-FSM at a non-start (mid-pipeline) state"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :enriched (str "ctx-" (:id data))))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                    (assoc data :phase :initialized))
+                                      :dispatches [[:gather (constantly true)]]}
+                         :gather     {:handler    (fn [resources data]
+                                                    (let [ctx (fsm/run-sub-fsm child-fsm resources
+                                                                               {:id (:agent data)})]
+                                                      (assoc data :phase :gathered :context ctx)))
+                                      :dispatches [[:finalize (constantly true)]]}
+                         :finalize   {:handler    (fn [_r data]
+                                                    (assoc data :phase :finalized
+                                                           :summary (str "done-" (get-in data [:context :enriched]))))
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:agent "ling-42"}})]
+      (is (= :finalized (:phase result)))
+      (is (= "ctx-ling-42" (get-in result [:context :enriched])))
+      (is (= "done-ctx-ling-42" (:summary result))))))
+
+(deftest parent-continues-after-sub-fsm-error-recovery
+  (testing "Parent dispatches to recovery state when sub-FSM fails"
+    (let [failing-child (fsm/compile
+                         {:fsm {::fsm/start {:handler    (fn [_r _data]
+                                                           (throw (ex-info "child-crash" {:reason :timeout})))
+                                             :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                    (let [result (fsm/run-sub-fsm failing-child resources {})]
+                                                      (if (fsm/sub-fsm-error? result)
+                                                        (assoc data :sub-failed true
+                                                               :error-msg (:sub-fsm/message result))
+                                                        (assoc data :sub-result result))))
+                                      :dispatches [[:recover (fn [{:keys [sub-failed]}] sub-failed)]
+                                                   [:success (constantly true)]]}
+                         :recover   {:handler    (fn [_r data]
+                                                   (assoc data :phase :recovered :fallback-value 0))
+                                     :dispatches [[::fsm/end (constantly true)]]}
+                         :success   {:handler    (fn [_r data]
+                                                   (assoc data :phase :succeeded))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {}})]
+      (is (= :recovered (:phase result)))
+      (is (true? (:sub-failed result)))
+      (is (string? (:error-msg result)))
+      (is (= 0 (:fallback-value result))))))
+
+(deftest parent-orchestrates-sequential-sub-fsms
+  (testing "Parent invokes multiple sub-FSMs in sequence across states"
+    (let [validator (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :valid? (pos? (:count data 0))))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          enricher (fsm/compile
+                    {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                      (assoc data :label (str "item-" (:count data))))
+                                        :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start  {:handler    (fn [resources data]
+                                                     (let [v (fsm/run-sub-fsm validator resources
+                                                                              (select-keys data [:count]))]
+                                                       (assoc data :validation v)))
+                                       :dispatches [[:enrich (fn [{:keys [validation]}]
+                                                               (:valid? validation))]
+                                                    [::fsm/end (constantly true)]]}
+                         :enrich      {:handler    (fn [resources data]
+                                                     (let [e (fsm/run-sub-fsm enricher resources
+                                                                              (select-keys data [:count]))]
+                                                       (assoc data :enrichment e)))
+                                       :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:count 5}})]
+      (is (true? (get-in result [:validation :valid?])))
+      (is (= "item-5" (get-in result [:enrichment :label]))))))
+
+(deftest parent-invokes-multiple-sub-fsms-in-single-handler
+  (testing "Single parent handler calls two sub-FSMs and merges both"
+    (let [auth-fsm (fsm/compile
+                    {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                      {:token (str "tok-" (:user data))
+                                                       :authenticated true})
+                                        :dispatches [[::fsm/end (constantly true)]]}}})
+          config-fsm (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        {:max-retries 3
+                                                         :timeout-ms (* (:tier data) 1000)})
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                    (let [auth (fsm/run-sub-fsm auth-fsm resources
+                                                                                {:user (:user data)})
+                                                          cfg  (fsm/run-sub-fsm config-fsm resources
+                                                                                {:tier (:tier data)})]
+                                                      (assoc data :auth auth :config cfg)))
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:user "alice" :tier 2}})]
+      (is (= "tok-alice" (get-in result [:auth :token])))
+      (is (true? (get-in result [:auth :authenticated])))
+      (is (= 3 (get-in result [:config :max-retries])))
+      (is (= 2000 (get-in result [:config :timeout-ms]))))))
+
+(deftest parent-halt-resume-with-sub-fsm
+  (testing "Parent FSM halts before sub-FSM state, then resumes into it"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :enriched true))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          compiled (fsm/compile
+                    {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                      (assoc data :phase :ready))
+                                        :dispatches [[:invoke (fn [{:keys [phase]}]
+                                                                (= phase :ready))]]}
+                           :invoke     {:handler    (fn [_r data]
+                                                      (assoc data :phase :halting))
+                                        :dispatches [[::fsm/halt (fn [{:keys [phase]}]
+                                                                   (= phase :halting))]
+                                                     [::fsm/end (constantly true)]]}}})
+          halted (fsm/run compiled {} {:data {}})]
+      ;; FSM should be halted with state preserved
+      (is (map? halted))
+      (is (= :halting (get-in halted [:data :phase])))
+      (is (some? (:current-state-id halted)))
+      ;; Resume by running from halted state using step
+      (let [resumed-compiled (fsm/compile
+                              {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                                (let [ctx (fsm/run-sub-fsm child-fsm resources
+                                                                                           {:id "resumed"})]
+                                                                  (assoc data :phase :completed :child ctx)))
+                                                  :dispatches [[::fsm/end (constantly true)]]}}})
+            result (fsm/run resumed-compiled {} {:data (:data halted)})]
+        (is (= :completed (:phase result)))
+        (is (true? (get-in result [:child :enriched])))))))
+
+(deftest parent-trace-records-transitions-around-sub-fsm
+  (testing "Parent FSM trace captures state transitions before/after sub-FSM invocation"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :child-done true))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm  {::fsm/start {:handler    (fn [_r data]
+                                                     (assoc data :step :prepare))
+                                       :dispatches [[:invoke (constantly true)]]}
+                          :invoke     {:handler    (fn [resources data]
+                                                     (let [ctx (fsm/run-sub-fsm child-fsm resources {})]
+                                                       (assoc data :step :invoked :child ctx)))
+                                       :dispatches [[:cleanup (constantly true)]]}
+                          :cleanup    {:handler    (fn [_r data]
+                                                     (assoc data :step :cleaned))
+                                       :dispatches [[::fsm/end (constantly true)]]}
+                          ;; Custom end handler to expose trace
+                          ::fsm/end   {:handler (fn [_r fsm] fsm)}}
+                   :opts {:max-trace 50}})
+          result (fsm/run parent)]
+      ;; Should have 3 trace segments: ::start -> :invoke -> :cleanup
+      (is (= 3 (count (:trace result))))
+      (is (= ::fsm/start (:state-id (nth (:trace result) 0))))
+      (is (= :invoke (:state-id (nth (:trace result) 1))))
+      (is (= :cleanup (:state-id (nth (:trace result) 2))))
+      ;; All transitions should be successful
+      (is (every? #(= :success (:status %)) (:trace result))))))
+
+(deftest make-sub-fsm-handler-at-mid-pipeline-state
+  (testing "make-sub-fsm-handler works at a non-start state in parent pipeline"
+    (let [enricher (fsm/compile
+                    {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                      (assoc data :enriched true
+                                                             :label (str "enriched-" (:x data))))
+                                        :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                    (assoc data :initialized true))
+                                      :dispatches [[:mid (constantly true)]]}
+                         :mid        {:handler    (fsm/make-sub-fsm-handler
+                                                   enricher
+                                                   {:data-fn    #(select-keys % [:x])
+                                                    :result-key :enrichment})
+                                      :dispatches [[:final (constantly true)]]}
+                         :final      {:handler    (fn [_r data]
+                                                    (assoc data :done true
+                                                           :summary (get-in data [:enrichment :label])))
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:x 99}})]
+      (is (true? (:initialized result)))
+      (is (true? (:done result)))
+      (is (true? (get-in result [:enrichment :enriched])))
+      (is (= "enriched-99" (:summary result))))))
+
+(deftest parent-pre-post-hooks-with-sub-fsm
+  (testing "Parent pre/post hooks fire around sub-FSM invocation states"
+    (let [hook-log (atom [])
+          child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :child-ran true))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm  {::fsm/start {:handler    (fn [_r data]
+                                                     (assoc data :phase :start))
+                                       :dispatches [[:invoke (constantly true)]]}
+                          :invoke     {:handler    (fn [resources data]
+                                                     (let [ctx (fsm/run-sub-fsm child-fsm resources {})]
+                                                       (assoc data :phase :invoked :child ctx)))
+                                       :dispatches [[::fsm/end (constantly true)]]}}
+                   :opts {:pre  (fn [fsm _r]
+                                  (swap! hook-log conj [:pre (:current-state-id fsm)])
+                                  fsm)
+                          :post (fn [fsm _r]
+                                  (swap! hook-log conj [:post (:current-state-id fsm)])
+                                  fsm)}})
+          result (fsm/run parent)]
+      (is (= :invoked (:phase result)))
+      (is (true? (get-in result [:child :child-ran])))
+      ;; Hooks should include the :invoke state where sub-FSM runs
+      (is (some #(= [:pre :invoke] %) @hook-log)
+          "Pre hook should fire for invoke state")
+      (is (some #(= [:post ::fsm/end] %) @hook-log)
+          "Post hook should fire after transition to end"))))
+
+(deftest parent-conditional-dispatch-on-sub-fsm-result
+  (testing "Parent dispatches to different states based on sub-FSM result content"
+    (let [scorer (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                    (assoc data :score (* (:quality data) 10)))
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                    (let [result (fsm/run-sub-fsm scorer resources
+                                                                                  {:quality (:quality data)})]
+                                                      (assoc data :score (:score result))))
+                                      :dispatches [[:premium (fn [{:keys [score]}] (>= score 80))]
+                                                   [:standard (fn [{:keys [score]}] (>= score 40))]
+                                                   [:rejected (constantly true)]]}
+                         :premium   {:handler    (fn [_r data] (assoc data :tier :premium))
+                                     :dispatches [[::fsm/end (constantly true)]]}
+                         :standard  {:handler    (fn [_r data] (assoc data :tier :standard))
+                                     :dispatches [[::fsm/end (constantly true)]]}
+                         :rejected  {:handler    (fn [_r data] (assoc data :tier :rejected))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          high   (fsm/run parent {} {:data {:quality 9}})
+          mid    (fsm/run parent {} {:data {:quality 5}})
+          low    (fsm/run parent {} {:data {:quality 2}})]
+      (is (= :premium (:tier high)))
+      (is (= 90 (:score high)))
+      (is (= :standard (:tier mid)))
+      (is (= 50 (:score mid)))
+      (is (= :rejected (:tier low)))
+      (is (= 20 (:score low))))))
+
+(deftest parent-sub-fsm-shares-and-isolates-resources
+  (testing "Sub-FSM gets transformed resources without polluting parent"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                       (assoc data
+                                                              :child-db (:db resources)
+                                                              :child-secret (:secret resources)))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child-fsm
+                                                   {:resources-fn (fn [r]
+                                                                    (-> r
+                                                                        (assoc :secret "child-only-secret")
+                                                                        (dissoc :admin-key)))
+                                                    :result-key :child})
+                                      :dispatches [[:verify (constantly true)]]}
+                         :verify    {:handler    (fn [resources data]
+                                                   ;; Parent resources should still have :admin-key
+                                                   (assoc data :parent-has-admin (contains? resources :admin-key)
+                                                          :child-has-secret (get-in data [:child :child-secret])))
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent
+                          {:db "prod-db" :admin-key "super-secret"}
+                          {:data {}})]
+      ;; Child got transformed resources
+      (is (= "prod-db" (get-in result [:child :child-db])))
+      (is (= "child-only-secret" (get-in result [:child :child-secret])))
+      ;; Parent resources unchanged
+      (is (true? (:parent-has-admin result))))))
+
+(deftest parent-sub-fsm-fx-chain-across-states
+  (testing "Parent with FX-aware sub-FSM handlers across multiple states"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          validate-fsm (fsm/compile
+                        {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                          {:data (assoc data :validated true)
+                                                           :fx [[:test-log :validated]]})
+                                            :dispatches [[::fsm/end (constantly true)]]}}})
+          enrich-fsm (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                        {:data (assoc data :enriched true)
+                                                         :fx [[:test-log :enriched]]})
+                                          :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   validate-fsm
+                                                   {:result-key :validation
+                                                    :fx? true})
+                                      :dispatches [[:enrich (constantly true)]]}
+                         :enrich    {:handler    (fsm/make-sub-fsm-handler
+                                                  enrich-fsm
+                                                  {:result-key :enrichment
+                                                   :fx? true})
+                                     :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:input "test"}})]
+      (is (true? (get-in result [:validation :validated])))
+      (is (true? (get-in result [:enrichment :enriched])))
+      ;; Both child FX should have been surfaced and executed by parent pipeline
+      (is (= [:validated :enriched] @fx-log)
+          "FX from both sub-FSMs should fire in order through parent pipeline")
+      (fx/clear-fx :test-log))))
+
+(deftest parent-error-state-from-sub-fsm-transition-failure
+  (testing "Parent transitions to error state when sub-FSM causes transition failure"
+    (let [;; Child that always succeeds
+          child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :child-ok true))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          ;; Parent where sub-FSM handler returns data that no dispatch pred matches
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                    (let [ctx (fsm/run-sub-fsm child-fsm resources {})]
+                                                      ;; Return data that won't match any dispatch
+                                                      (assoc data :status :unknown)))
+                                      :dispatches [[:only-if-ready (fn [{:keys [status]}]
+                                                                     (= status :ready))]]}
+                         :only-if-ready {:handler    (fn [_r data] data)
+                                         :dispatches [[::fsm/end (constantly true)]]}
+                         ;; Custom error handler to inspect
+                         ::fsm/error {:handler (fn [_r fsm]
+                                                 {:error-caught true
+                                                  :state (:current-state-id fsm)
+                                                  :data (:data fsm)})}}})
+          result (fsm/run parent {} {:data {}})]
+      (is (true? (:error-caught result))
+          "Parent should reach error state when no transition matches"))))
+
+(deftest parent-sub-fsm-with-multi-state-child-and-fx
+  (testing "Parent orchestrates multi-state child FSM with FX at each child state"
+    (let [fx-log (atom [])
+          _      (fx/reg-fx :test-log (fn [value] (swap! fx-log conj value)))
+          pipeline-child (fsm/compile
+                          {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                            {:data (assoc data :step1 true)
+                                                             :fx [[:test-log :child-step1]]})
+                                              :dispatches [[:step2 (constantly true)]]}
+                                 :step2      {:handler    (fn [_r data]
+                                                            {:data (assoc data :step2 true)
+                                                             :fx [[:test-log :child-step2]]})
+                                              :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                    {:data (assoc data :parent-started true)
+                                                     :fx [[:test-log :parent-start]]})
+                                      :dispatches [[:delegate (constantly true)]]}
+                         :delegate   {:handler    (fsm/make-sub-fsm-handler
+                                                   pipeline-child
+                                                   {:result-key :pipeline
+                                                    :fx? true})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {}})]
+      (is (true? (:parent-started result)))
+      (is (true? (get-in result [:pipeline :step1])))
+      (is (true? (get-in result [:pipeline :step2])))
+      ;; Parent start FX fires during parent pipeline,
+      ;; child FX are captured and surfaced when make-sub-fsm-handler returns
+      (is (= [:parent-start :child-step1 :child-step2] @fx-log)
+          "Parent FX then child FX in order")
+      (fx/clear-fx :test-log))))
+
+(deftest parent-run-async-with-sub-fsm
+  (testing "run-async works with parent FSM containing sub-FSM handlers"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :enriched true))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fn [resources data]
+                                                    (let [ctx (fsm/run-sub-fsm child-fsm resources
+                                                                               {:id (:agent data)})]
+                                                      (assoc data :context ctx)))
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result @(fsm/run-async parent {} {:data {:agent "async-ling"}})]
+      (is (= "async-ling" (:agent result)))
+      (is (true? (get-in result [:context :enriched]))))))
+
+(deftest parent-empty-data-passthrough-to-sub-fsm
+  (testing "Parent passes empty data to sub-FSM when data-fn returns {}"
+    (let [child-fsm (fsm/compile
+                     {:fsm {::fsm/start {:handler    (fn [_r data]
+                                                       (assoc data :child-ran true
+                                                              :input-count (count data)))
+                                         :dispatches [[::fsm/end (constantly true)]]}}})
+          parent (fsm/compile
+                  {:fsm {::fsm/start {:handler    (fsm/make-sub-fsm-handler
+                                                   child-fsm
+                                                   {:data-fn    (constantly {})
+                                                    :result-key :child})
+                                      :dispatches [[::fsm/end (constantly true)]]}}})
+          result (fsm/run parent {} {:data {:secret "hidden" :internal 42}})]
+      ;; Child received empty data, so input-count should be 0
+      (is (= 0 (get-in result [:child :input-count])))
+      (is (true? (get-in result [:child :child-ran])))
+      ;; Parent data preserved
+      (is (= "hidden" (:secret result)))
+      (is (= 42 (:internal result))))))

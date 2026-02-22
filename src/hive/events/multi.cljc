@@ -192,6 +192,69 @@
                               :else []))))))
 
 ;; =============================================================================
+;; Pure Orchestration: Shared Graph Construction + Topological Traversal
+;; =============================================================================
+
+(defn- build-graph
+  "Build dependency graph from operations.
+
+   Returns {:in-degree {id dep-count}, :fwd {id [dependents]}}.
+
+   - :in-degree maps each op ID to the number of its incoming edges
+   - :fwd maps each op ID to the vector of ops that depend on it
+
+   Pure function — shared by validate-ops and assign-waves."
+  [ops]
+  (let [in-degree (reduce (fn [m {:keys [id depends_on]}]
+                            (assoc m id (count (or depends_on []))))
+                          {}
+                          ops)
+        fwd       (reduce (fn [m {:keys [id depends_on]}]
+                            (reduce (fn [m' dep]
+                                      (update m' dep (fnil conj []) id))
+                                    m
+                                    (or depends_on [])))
+                          {}
+                          ops)]
+    {:in-degree in-degree :fwd fwd}))
+
+(defn- topo-traverse
+  "Generic topological traversal using Kahn's algorithm (wave-level BFS).
+
+   Processes nodes in dependency-ordered waves. Each wave contains all
+   nodes whose dependencies have been satisfied.
+
+   Parameters:
+   - graph   — {:in-degree {id count}, :fwd {id [dependents]}}
+   - step-fn — (fn [acc wave-ids wave-num] new-acc) called once per wave
+   - init    — initial accumulator value
+
+   Returns [acc visited-count] where visited-count is total nodes processed.
+   If visited-count < total nodes, the graph contains a cycle.
+
+   Pure function — no side effects."
+  [{:keys [in-degree fwd]} step-fn init]
+  (loop [deg     in-degree
+         wave    1
+         acc     init
+         visited 0]
+    (let [ready (into [] (keep (fn [[id d]] (when (zero? d) id))) deg)]
+      (if (empty? ready)
+        [acc visited]
+        (let [acc'  (step-fn acc ready wave)
+              deg'  (reduce dissoc deg ready)
+              deg'' (reduce (fn [d rid]
+                              (reduce (fn [d' child]
+                                        (if (contains? d' child)
+                                          (update d' child dec)
+                                          d'))
+                                      d
+                                      (get fwd rid [])))
+                            deg'
+                            ready)]
+          (recur deg'' (inc wave) acc' (+ visited (count ready))))))))
+
+;; =============================================================================
 ;; Pure Orchestration: Validation (Kahn's Algorithm)
 ;; =============================================================================
 
@@ -246,43 +309,14 @@
 
     ;; Check circular dependencies via Kahn's algorithm
     (when (empty? @errors)
-      (let [in-degree (reduce (fn [m {:keys [id depends_on]}]
-                                (reduce (fn [m' _dep]
-                                          (update m' id (fnil inc 0)))
-                                        (update m id (fnil identity 0))
-                                        (or depends_on [])))
-                              {}
-                              ops)
-            queue     #?(:clj (into clojure.lang.PersistentQueue/EMPTY
-                                    (keep (fn [[id deg]] (when (zero? deg) id)) in-degree))
-                         :cljs (into #queue []
-                                     (keep (fn [[id deg]] (when (zero? deg) id)) in-degree)))
-            ;; Build forward adjacency: dep -> [dependents]
-            fwd       (reduce (fn [m {:keys [id depends_on]}]
-                                (reduce (fn [m' dep]
-                                          (update m' dep (fnil conj []) id))
-                                        m
-                                        (or depends_on [])))
-                              {}
-                              ops)]
-        (loop [q      queue
-               sorted []
-               deg    in-degree]
-          (if (empty? q)
-            (when (< (count sorted) (count ops))
-              (add-error (str "Circular dependency detected among: "
-                              (str/join ", " (remove (set sorted) (map :id ops))))))
-            (let [node     (peek q)
-                  q'       (pop q)
-                  sorted'  (conj sorted node)
-                  children (get fwd node [])
-                  [q'' deg'] (reduce (fn [[q d] child]
-                                       (let [new-deg (dec (get d child))]
-                                         [(if (zero? new-deg) (conj q child) q)
-                                          (assoc d child new-deg)]))
-                                     [q' deg]
-                                     children)]
-              (recur q'' sorted' deg'))))))
+      (let [graph (build-graph ops)
+            [sorted visited] (topo-traverse graph
+                                            (fn [sorted wave-ids _wave-num]
+                                              (into sorted wave-ids))
+                                            [])]
+        (when (< visited (count ops))
+          (add-error (str "Circular dependency detected among: "
+                          (str/join ", " (remove (set sorted) (map :id ops))))))))
 
     (if (seq @errors)
       {:valid false :errors @errors}
@@ -407,40 +441,14 @@
      ;; => [{:id \"a\" :wave 1 ...} {:id \"b\" :wave 2 ...}]"
   [ops]
   (let [ops-by-id (into {} (map (juxt :id identity) ops))
-        ;; Build in-degree map
-        in-degree (reduce (fn [m {:keys [id depends_on]}]
-                            (assoc m id (count (or depends_on []))))
-                          {}
-                          ops)
-        ;; Build forward adjacency: dep -> [dependents]
-        fwd       (reduce (fn [m {:keys [id depends_on]}]
-                            (reduce (fn [m' dep]
-                                      (update m' dep (fnil conj []) id))
-                                    m
-                                    (or depends_on [])))
-                          {}
-                          ops)]
-    (loop [deg       in-degree
-           wave-num  1
-           result    []]
-      (let [ready (keep (fn [[id d]] (when (zero? d) id)) deg)]
-        (if (empty? ready)
-          result
-          (let [;; Assign current wave
-                wave-ops (mapv (fn [id] (assoc (get ops-by-id id) :wave wave-num))
-                               ready)
-                ;; Remove processed nodes, decrement dependents
-                remaining-deg (reduce (fn [d id] (dissoc d id)) deg ready)
-                updated-deg   (reduce (fn [d ready-id]
-                                        (reduce (fn [d' child]
-                                                  (if (contains? d' child)
-                                                    (update d' child dec)
-                                                    d'))
-                                                d
-                                                (get fwd ready-id [])))
-                                      remaining-deg
-                                      ready)]
-            (recur updated-deg (inc wave-num) (into result wave-ops))))))))
+        graph     (build-graph ops)
+        [result _] (topo-traverse graph
+                                  (fn [result wave-ids wave-num]
+                                    (into result (mapv (fn [id]
+                                                         (assoc (get ops-by-id id) :wave wave-num))
+                                                       wave-ids)))
+                                  [])]
+    result))
 
 ;; =============================================================================
 ;; Pure Orchestration: Multi-Spec Compilation

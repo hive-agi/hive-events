@@ -33,7 +33,8 @@
             [hive.events.cofx :as cofx]
             [hive.events.router :as router]
             [hive.events.fsm :as fsm]
-            [hive.events.multi :as multi]))
+            [hive.events.multi :as multi]
+            [hive.events.log :as log]))
 
 ;; Re-export core API
 (def ->interceptor interceptor/->interceptor)
@@ -73,3 +74,6 @@
 (def fsm-run-sub-fx fsm/run-sub-fsm-fx)
 (def fsm-sub-error? fsm/sub-fsm-error?)
 (def fsm-make-sub-handler fsm/make-sub-fsm-handler)
+
+;; Logging configuration
+(def set-log-fn! log/set-log-fn!)
