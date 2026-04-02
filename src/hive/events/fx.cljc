@@ -59,10 +59,29 @@
   ([id]
    (swap! fx-registry dissoc id)))
 
+(defn unreg-fx
+  "Remove effect handler for fx-id.
+   Returns true if the handler was found and removed, false if not found.
+   Thread-safe (uses swap! on atom)."
+  [id]
+  (let [removed? (atom false)]
+    (swap! fx-registry
+           (fn [registry]
+             (if (contains? registry id)
+               (do (reset! removed? true)
+                   (dissoc registry id))
+               registry)))
+    @removed?))
+
 (defn get-fx
   "Get effect handler by id."
   [id]
   (get @fx-registry id))
+
+(defn registered-fx-ids
+  "Return set of registered effect handler IDs."
+  []
+  (set (keys @fx-registry)))
 
 (defn- invoke-fx-handler
   "Look up and invoke a registered fx handler for a single effect.

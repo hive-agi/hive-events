@@ -43,10 +43,14 @@
 
 (def reg-fx fx/reg-fx)
 (def clear-fx fx/clear-fx)
+(def unreg-fx fx/unreg-fx)
+(def registered-fx-ids fx/registered-fx-ids)
 (def do-fx fx/do-fx)
 
 (def reg-cofx cofx/reg-cofx)
 (def inject-cofx cofx/inject-cofx)
+(def unreg-cofx cofx/unreg-cofx)
+(def registered-cofx-ids cofx/registered-cofx-ids)
 
 (def reg-event-fx router/reg-event-fx)
 (def reg-event-db router/reg-event-db)

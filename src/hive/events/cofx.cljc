@@ -49,10 +49,29 @@
   ([id]
    (swap! cofx-registry dissoc id)))
 
+(defn unreg-cofx
+  "Remove coeffect handler for cofx-id.
+   Returns true if the handler was found and removed, false if not found.
+   Thread-safe (uses swap! on atom)."
+  [id]
+  (let [removed? (atom false)]
+    (swap! cofx-registry
+           (fn [registry]
+             (if (contains? registry id)
+               (do (reset! removed? true)
+                   (dissoc registry id))
+               registry)))
+    @removed?))
+
 (defn get-cofx
   "Get coeffect handler by id."
   [id]
   (get @cofx-registry id))
+
+(defn registered-cofx-ids
+  "Return set of registered coeffect handler IDs."
+  []
+  (set (keys @cofx-registry)))
 
 (defn inject-cofx
   "Create an interceptor that injects a coeffect.
