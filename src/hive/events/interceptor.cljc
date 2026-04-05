@@ -108,6 +108,29 @@
                (recur final-ctx direction reversed?))))))))
 
 ;; =============================================================================
+;; Timed Interceptor (JVM only — delegates to hive-weave.timed)
+;; =============================================================================
+
+#?(:clj
+   (defn ->timed-interceptor
+     "Create an interceptor with a timeout budget on :before and/or :after.
+
+      If either phase exceeds timeout-ms, it is cancelled and the context
+      passes through unchanged (graceful degradation). This prevents any
+      single interceptor from hanging the entire event dispatch chain.
+
+      Usage:
+        (->timed-interceptor
+          :id :hk/smart-search-enrichment
+          :timeout-ms 15000
+          :after (fn [ctx] ...expensive enrichment...))
+
+      Delegates to hive-weave.timed/->timed-interceptor via requiring-resolve."
+     [& {:keys [_id _before _after _timeout-ms] :as m}]
+     (let [f (requiring-resolve 'hive-weave.timed/->timed-interceptor)]
+       (apply f (apply concat m)))))
+
+;; =============================================================================
 ;; Built-in Interceptors
 
 (def debug

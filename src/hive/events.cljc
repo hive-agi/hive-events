@@ -38,6 +38,7 @@
 
 ;; Re-export core API
 (def ->interceptor interceptor/->interceptor)
+#?(:clj (def ->timed-interceptor interceptor/->timed-interceptor))
 (def enqueue interceptor/enqueue)
 (def execute interceptor/execute)
 
