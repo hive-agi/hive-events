@@ -71,3 +71,50 @@
       (is (= "Incremented by 10" @side-effect-called))
       (router/clear-event)
       (fx/clear-fx :log-action))))
+
+(deftest dispatch-without-init-test
+  (testing "dispatch-sync works in a fresh process that never called init!"
+    ;; Simulate a fresh load: reset the private app-db outer atom back to
+    ;; its default atom-of-atom shape so this test reproduces the state of
+    ;; a process that has not invoked `router/init!`. Other tests in this
+    ;; ns call `init!` which replaces the inner value, so we must undo that
+    ;; here to actually exercise the no-init code path.
+    (reset! @#'hive.events.router/app-db (atom {}))
+    (let [fx-called (atom nil)]
+      (ev/reg-fx :regression/probe
+                 (fn [v] (reset! fx-called v)))
+      (ev/reg-event-fx :regression/event
+                       (fn [_cofx _event]
+                         {:regression/probe :hello}))
+      ;; Must not throw ClassCastException (PersistentArrayMap -> Future).
+      (is (nil? (try
+                  (ev/dispatch-sync [:regression/event])
+                  nil
+                  (catch Throwable t t)))
+          "dispatch-sync should not throw when init! was never called")
+      (is (= :hello @fx-called) "fx should have fired")
+      (router/clear-event)
+      (fx/clear-fx :regression/probe))))
+
+(deftest rapid-stop-start-test
+  (testing "stop! then immediate dispatch does not lose events"
+    (let [db (atom {:n 0})]
+      (router/init! db)
+      (ev/reg-event-db :rapid/bump
+                       (fn [db _] (update db :n inc)))
+      ;; Prime the async loop once.
+      (ev/dispatch [:rapid/bump])
+      ;; Rapid stop + dispatch cycles. Each stop! must wait for the
+      ;; prior go-loop to exit before replacing the queue, otherwise
+      ;; subsequent dispatches could land on a leaked old consumer.
+      (dotimes [_ 5]
+        (router/stop!)
+        (ev/dispatch [:rapid/bump]))
+      ;; Give the live loop a moment to drain the final dispatch.
+      (Thread/sleep 50)
+      (router/stop!)
+      ;; At minimum the final dispatch after the last stop! must have
+      ;; been processed — proves the new channel has a live consumer.
+      (is (pos? (:n @db))
+          "events dispatched after stop! must still be processed")
+      (router/clear-event))))

@@ -37,33 +37,70 @@
 ;; =============================================================================
 ;; State
 
-(defonce ^:private app-db (atom {}))
+;; Outer atom holds an inner atom (atom-of-atom). Default to a fresh inner
+;; atom so `dispatch`/`dispatch-sync` work without an explicit `init!` call;
+;; `init!` can still swap in a caller-provided atom.
+(defonce ^:private app-db (atom (atom {})))
 (defonce ^:private event-registry (atom {}))
 
 #?(:clj (defonce ^:private event-queue (atom (chan 1024))))
 #?(:clj (defonce ^:private processing? (atom false)))
+;; Promise delivered by the go-loop when it terminates. `stop!` waits on
+;; this to ensure the previous loop has exited before installing a fresh
+;; channel, preventing stop/start races.
+#?(:clj (defonce ^:private loop-exit (atom nil)))
 
 ;; Forward declaration for dispatch-impl registration
 (declare dispatch)
 
+;; Register default :db and :dispatch-impl fx handlers against the default
+;; inner atom so dispatch works without requiring an explicit `init!`.
+;; These are a fallback: only install them if nothing else has already
+;; registered a handler, so that `init!`-supplied handlers win and we don't
+;; emit spurious "overwriting fx handler" warnings on load order shuffles.
+;; `init!` itself explicitly replaces these (see below).
+(defonce ^:private _default-fx-registration
+  (do
+    (when-not (fx/get-fx :db)
+      (fx/reg-fx :db
+                 (fn [new-db]
+                   (reset! @app-db new-db))))
+    (when-not (fx/get-fx :dispatch-impl)
+      (fx/reg-fx :dispatch-impl (fn [event] (dispatch event))))
+    ::registered))
+
 (defn init!
   "Initialize the router with an app-db atom.
 
-   Must be called before dispatching events."
+   May be called to install a caller-supplied app-db; dispatch also works
+   without calling init! thanks to the default registrations above."
   [db-atom]
   (reset! app-db db-atom)
 
-  ;; Register :db effect handler
+  ;; Replace :db and :dispatch-impl handlers. The defaults (or a previous
+  ;; init!) may already have registered these; unreg first so we silently
+  ;; overwrite without emitting `overwriting fx handler` warnings — the
+  ;; replacement is the explicit intent of calling init!.
+  (fx/unreg-fx :db)
   (fx/reg-fx :db
              (fn [new-db]
                (reset! db-atom new-db)))
 
   ;; Inject dispatch function for :dispatch effects
   ;; Using a wrapper to avoid forward reference issues
+  (fx/unreg-fx :dispatch-impl)
   (fx/reg-fx :dispatch-impl (fn [event] (dispatch event))))
 
 (defn get-app-db
-  "Get the current app-db atom."
+  "Return the inner db atom currently held by the router.
+
+   `app-db` is internally an atom-of-atom (an outer pointer containing the
+   caller-supplied inner atom, or the default inner atom when `init!` has
+   not been called). This returns the INNER atom — deref it to read the
+   current db value, or `reset!` / `swap!` it to mutate state.
+
+   Note: this is a snapshot of the pointer at call time; if `init!` is
+   later called with a different atom, the returned handle will be stale."
   []
   @app-db)
 
@@ -162,7 +199,9 @@
      "Start the async event processing loop."
      []
      (when (compare-and-set! processing? false true)
-       (let [q @event-queue]
+       (let [q @event-queue
+             exited (promise)]
+         (reset! loop-exit exited)
          (go-loop []
            (if-let [event (<! q)]
              (do
@@ -171,8 +210,10 @@
                  (catch Exception e
                    (log/error "error processing event" (first event) e)))
                (recur))
-             ;; Channel closed — mark processing as stopped
-             (reset! processing? false)))))))
+             ;; Channel closed — mark processing as stopped and signal exit
+             (do
+               (reset! processing? false)
+               (deliver exited :exited))))))))
 
 (defn dispatch
   "Dispatch event asynchronously.
@@ -213,10 +254,20 @@
      "Stop the event processing loop and reset the queue.
 
       Closes the current event-queue channel (causing the go-loop to terminate),
-      creates a fresh channel, and resets the processing flag.
+      waits (bounded) for the loop to actually exit, then installs a fresh
+      channel and resets the processing flag.
 
       After calling stop!, you can restart by calling init! and dispatching events."
      []
-     (when (compare-and-set! processing? true false)
-       (async/close! @event-queue))
-     (reset! event-queue (chan 1024))))
+     (let [was-running? (compare-and-set! processing? true false)
+           exited       @loop-exit]
+       (when was-running?
+         (async/close! @event-queue))
+       ;; Wait for the previous go-loop to actually terminate before
+       ;; swapping in a new channel, so a rapid stop/start cycle can't
+       ;; leak the old consumer onto the new queue. Bounded to 1s so a
+       ;; stuck loop can't deadlock the caller.
+       (when (and was-running? exited)
+         (deref exited 1000 :timeout))
+       (reset! loop-exit nil)
+       (reset! event-queue (chan 1024)))))
