@@ -196,19 +196,28 @@
 
 #?(:clj
    (defn- start-event-loop!
-     "Start the async event processing loop."
+     "Start the async event processing loop.
+
+      Items on the queue are maps with ::event and ::bindings keys.
+      The caller's thread bindings are restored on the loop thread
+      before `process-event` runs so dynamic-var isolation hooks
+      (e.g. test *test-conn*) take effect inside event handlers."
      []
      (when (compare-and-set! processing? false true)
        (let [q @event-queue
              exited (promise)]
          (reset! loop-exit exited)
          (go-loop []
-           (if-let [event (<! q)]
+           (if-let [item (<! q)]
              (do
                (try
-                 (process-event event)
-                 (catch Exception e
-                   (log/error "error processing event" (first event) e)))
+                 (let [event    (::event item)
+                       bindings (::bindings item)]
+                   (with-bindings* (or bindings {})
+                     (fn [] (process-event event))))
+                 (catch Throwable e
+                   (log/error "error processing event"
+                              (first (::event item)) e)))
                (recur))
              ;; Channel closed — mark processing as stopped and signal exit
              (do
@@ -218,12 +227,17 @@
 (defn dispatch
   "Dispatch event asynchronously.
 
-   On JVM: Queues event for processing in order
-   On JS: Uses setTimeout for async behavior"
+   On JVM: Queues event for processing in order. Captures the caller's
+   thread bindings (via `get-thread-bindings`) so that dynamic vars
+   (e.g. test-isolation `*test-conn*`) propagate into the event-loop
+   thread when the handler runs.
+
+   On JS: Uses setTimeout for async behavior."
   [event]
   #?(:clj (do
             (start-event-loop!)
-            (async/put! @event-queue event))
+            (let [bindings (get-thread-bindings)]
+              (async/put! @event-queue {::event event ::bindings bindings})))
      :cljs (js/setTimeout #(process-event event) 0)))
 
 ;; =============================================================================
@@ -233,11 +247,15 @@
    (defn dispatch-async
      "Dispatch event and return a channel with the result.
 
-      Useful for waiting on event processing completion."
+      Useful for waiting on event processing completion. Captures the
+      caller's thread bindings so dynamic-var isolation hooks propagate
+      into the go-block that runs `process-event`."
      [event]
-     (let [result-chan (chan 1)]
+     (let [result-chan (chan 1)
+           bindings    (get-thread-bindings)]
        (go
-         (let [context (process-event event)]
+         (let [context (with-bindings* (or bindings {})
+                         (fn [] (process-event event)))]
            (>! result-chan context)))
        result-chan)))
 
