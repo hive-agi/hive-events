@@ -52,12 +52,12 @@
 ;; Defaults
 ;; =============================================================================
 
-(defn default-on-end
+(defn- default-on-end
   "Returns the :data key from the FSM state map."
   [_resources {:keys [data]}]
   data)
 
-(defn default-on-error
+(defn- default-on-error
   "Default error handler — throws ex-info with FSM state as data."
   [_resources fsm]
   (throw (ex-info "FSM execution error" (select-keys fsm [:data :error :trace :current-state-id]))))
@@ -66,7 +66,7 @@
 ;; Handler Normalization
 ;; =============================================================================
 
-(defn normalize-handler
+(defn- normalize-handler
   "Wrap sync handlers to match the async callback interface.
    Async handlers (`:async? true`) are passed through unchanged.
 
@@ -88,7 +88,7 @@
 ;; Spec Validation & Compilation
 ;; =============================================================================
 
-(defn validate-state-spec
+(defn- validate-state-spec
   "Validate a single state spec. Handlers are required for all states.
    Dispatches are required for non-terminal states."
   [id {:keys [handler dispatches] :as spec}]
@@ -165,7 +165,7 @@
 ;; Trace
 ;; =============================================================================
 
-(defn add-trace-segment
+(defn- add-trace-segment
   "Append a trace segment, keeping at most `max-trace` entries."
   [trace max-trace segment]
   (vec (take-last max-trace (conj trace segment))))
@@ -174,7 +174,7 @@
 ;; Subscriptions
 ;; =============================================================================
 
-(defn run-subscriptions
+(defn- run-subscriptions
   "Check watched paths in data for changes, call handlers on change.
 
    Each subscription: `{path {:value old-val :handler (fn [path old new])}}`
@@ -250,6 +250,27 @@
     [result nil]))
 
 ;; =============================================================================
+;; Transition tap (opt-in observer)
+;; =============================================================================
+
+(defonce ^:private run-seq (atom 0))
+
+(defn- next-run-token []
+  (str "fsmrun-" (swap! run-seq inc)))
+
+(defonce ^:private transition-tap (atom nil))
+
+(defn set-transition-tap!
+  "Register a per-transition observer (fn [run-token fsm]); nil clears it."
+  [f]
+  (reset! transition-tap f)
+  :ok)
+
+(defn- tap! [run-token fsm]
+  (when-let [f @transition-tap]
+    (try (f run-token fsm) (catch #?(:clj Throwable :cljs :default) _ nil))))
+
+;; =============================================================================
 ;; Run
 ;; =============================================================================
 
@@ -274,6 +295,7 @@
    (run compiled-fsm resources {}))
   ([{fsm-graph :fsm
      {:keys [max-trace subscriptions pre post]
+      opts-run-id :run-id
       :or   {max-trace 1000
              pre       (fn [fsm _resources] fsm)
              post      (fn [fsm _resources] fsm)}} :opts}
@@ -281,10 +303,12 @@
     {init-trace    :trace
      init-data     :data
      init-state-id :current-state-id
+     init-run-id   :run-id
      :or           {init-state-id ::start
                     init-trace    []
                     init-data     {}}}]
-   (let [;; Initialize FSM state
+   (let [run-token (or init-run-id opts-run-id (next-run-token))
+         ;; Initialize FSM state
          init-fsm (post
                    {:fsm              fsm-graph
                     :current-state-id init-state-id
@@ -305,6 +329,7 @@
              ;; Run subscriptions on current data
              fsm (assoc-in fsm [:opts :subscriptions]
                            (run-subscriptions data (:subscriptions opts)))]
+         (tap! run-token fsm)
          (cond
            ;; Terminal states — invoke handler and return
            (= ::end current-state-id)

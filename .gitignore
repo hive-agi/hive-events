@@ -7,3 +7,4 @@ pom.xml.asc
 .lsp/
 .clj-kondo/.cache/
 .clj-kondo/
+*.elc
