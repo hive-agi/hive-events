@@ -17,7 +17,7 @@ Async event system for Clojure - re-frame patterns for JVM.
 Add to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.BuddhiLW/hive-events {:git/tag "v0.1.0" :git/sha "..."}}}
+{:deps {io.github.hive-agi/hive-events {:mvn/version "0.5.2"}}}
 ```
 
 ## Quick Start
