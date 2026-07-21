@@ -30,6 +30,16 @@ jobs:
         with:
           cli: latest
 
+      # Gate BEFORE the bump: a published pom is immutable, so a red suite
+      # must not be able to mint a version, tag it and ship it.
+      - name: Test
+        run: |
+          if [ -d test ]; then
+            clojure -M:test
+          else
+            echo "no test/ directory — nothing to gate on"
+          fi
+
       - name: Bump patch version
         run: clojure -T:build bump :level :patch
 
