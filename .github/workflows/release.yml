@@ -41,7 +41,9 @@ jobs:
           git add VERSION
           # [skip ci] stops this push from retriggering the workflow.
           git commit -m "chore(release): $VER [skip ci]"
-          git tag "v$VER"
+          # Annotated: `git push --follow-tags` ignores lightweight tags,
+          # which would publish the artifact and silently drop the tag.
+          git tag -a "v$VER" -m "release $VER"
           git push --follow-tags
 
       - name: Deploy
