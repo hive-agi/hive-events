@@ -32,7 +32,8 @@
             [hive.events.fx :as fx]
             [hive.events.cofx :as cofx]
             [hive.events.log :as log]
-            #?(:clj [clojure.core.async :as async :refer [go go-loop <! >! chan]])))
+            #?(:clj [clojure.core.async :as async :refer [go go-loop <! >! chan]])
+            [hive.events.observer :as observer]))
 
 ;; =============================================================================
 ;; State
@@ -173,7 +174,7 @@
    :stack []})
 
 (defn- process-event
-  "Process a single event through its interceptor chain."
+  "Process a single event through its interceptor chain, then notify observers."
   [event]
   (let [event-id (first event)]
     (if-let [{:keys [interceptors]} (get @event-registry event-id)]
@@ -181,9 +182,11 @@
                         (interceptor/enqueue interceptors)
                         (interceptor/execute))]
         (fx/do-fx (:effects context))
+        (observer/notify! event-id context)
         context)
       (do
         (log/warn "no handler for event" event-id)
+        (observer/notify! event-id (create-context event))
         nil))))
 
 (defn dispatch-sync
