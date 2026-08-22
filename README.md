@@ -1,5 +1,14 @@
 # hive-events
 
+<!-- hive-badges -->
+
+[![Clojars Project](https://img.shields.io/clojars/v/io.github.hive-agi/hive-events.svg)](https://clojars.org/io.github.hive-agi/hive-events)
+[![cljdoc](https://cljdoc.org/badge/io.github.hive-agi/hive-events)](https://cljdoc.org/d/io.github.hive-agi/hive-events/CURRENT)
+[![release](https://github.com/hive-agi/hive-events/actions/workflows/release.yml/badge.svg)](https://github.com/hive-agi/hive-events/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
+<!-- /hive-badges -->
+
 Async event system for Clojure - re-frame patterns for JVM.
 
 ## Overview
@@ -17,7 +26,7 @@ Async event system for Clojure - re-frame patterns for JVM.
 Add to your `deps.edn`:
 
 ```clojure
-{:deps {io.github.hive-agi/hive-events {:mvn/version "0.5.2"}}}
+{:deps {io.github.hive-agi/hive-events {:mvn/version "0.5.3"}}}
 ```
 
 ## Quick Start
