@@ -2,4 +2,4 @@
  :parent "hive"
  :description "Event system for hive ecosystem"
  :language :clojure
- :tags ["events" "messaging"]}
+ :tags ["events" "messaging"] :carto {:source-roots ["src" "test"]}}
