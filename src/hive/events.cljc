@@ -61,8 +61,11 @@
 ;; Registry API. ONE store: a handler registered here is the same registration
 ;; a host's own dispatch sees, so an addon depends on this library rather than
 ;; on whichever host happens to be running it.
+;; `event-registered?` and not `handler-registered?`: that name is already taken
+;; below by the multimethod-dispatch subsystem, and a second def would silently
+;; shadow it.
 (def get-event router/get-event)
-(def handler-registered? router/handler-registered?)
+(def event-registered? router/handler-registered?)
 (def registered-event-ids router/registered-event-ids)
 (def unreg-event router/unreg-event)
 (def append-interceptor! router/append-interceptor!)

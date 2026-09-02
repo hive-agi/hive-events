@@ -83,6 +83,16 @@
   []
   (set (keys @fx-registry)))
 
+(defn registry-snapshot
+  "Current effect registry value. For inspection and save/restore in tests."
+  []
+  @fx-registry)
+
+(defn restore-registry!
+  "Replace the whole effect registry with `handlers`. For test isolation."
+  [handlers]
+  (reset! fx-registry handlers))
+
 (defn- invoke-fx-handler
   "Look up and invoke a registered fx handler for a single effect.
    Logs warning if handler not found, catches and logs exceptions.

@@ -3,7 +3,9 @@
    validation or telemetry must read and write THIS registry; a second atom
    with the same API makes a handler registered by a library consumer
    invisible to the host's dispatch, and the miss is silent."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.java.io]
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [hive.events]
             [hive.events.fx :as fx]
             [hive.events.interceptor :as interceptor]
             [hive.events.router :as router]))
@@ -88,6 +90,31 @@
 ;; =============================================================================
 ;; Snapshot / restore
 ;; =============================================================================
+
+;; =============================================================================
+;; Facade hygiene
+;;
+;; hive.events is a wall of `(def x other/x)`. A name def'd twice there compiles
+;; without a warning and the LAST one wins, so a re-export can be silently
+;; replaced by an unrelated subsystem's function of the same name.
+;; =============================================================================
+
+(deftest facade-defs-no-name-twice-test
+  (let [src   (slurp (clojure.java.io/resource "hive/events.cljc"))
+        names (->> (re-seq #"(?m)^\(def\s+([^\s\)]+)" src)
+                   (map second))
+        dupes (->> (frequencies names)
+                   (filter (fn [[_ n]] (> n 1)))
+                   (map first)
+                   set)]
+    (is (seq names) "the facade was found and parsed")
+    (is (= #{} dupes)
+        (str "these names are def'd more than once in hive.events: " dupes))))
+
+(deftest facade-registry-exports-point-at-the-router-test
+  (is (identical? (var-get #'hive.events/event-registered?) router/handler-registered?))
+  (is (identical? (var-get #'hive.events/get-event) router/get-event))
+  (is (identical? (var-get #'hive.events/unreg-event) router/unreg-event)))
 
 (deftest snapshot-restore-round-trips-test
   (router/reg-event-fx ::a (fn [_ _] {}))

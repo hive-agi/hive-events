@@ -73,6 +73,16 @@
   []
   (set (keys @cofx-registry)))
 
+(defn registry-snapshot
+  "Current coeffect registry value. For inspection and save/restore in tests."
+  []
+  @cofx-registry)
+
+(defn restore-registry!
+  "Replace the whole coeffect registry with `handlers`. For test isolation."
+  [handlers]
+  (reset! cofx-registry handlers))
+
 (defn inject-cofx
   "Create an interceptor that injects a coeffect.
 
