@@ -171,6 +171,14 @@
   [id]
   (get @event-registry id))
 
+(defn get-interceptors
+  "The normalized user interceptor chain registered for `id`, or nil.
+
+   Does not include the handler-interceptor, which dispatch appends. For
+   inspection and for a caller checking its own interceptor is installed."
+  [id]
+  (:interceptors (get-event id)))
+
 (defn handler-registered?
   "True when an event handler is registered for `id`."
   [id]

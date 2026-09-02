@@ -73,6 +73,7 @@
 ;; below by the multimethod-dispatch subsystem, and a second def would silently
 ;; shadow it.
 (def get-event router/get-event)
+(def get-interceptors router/get-interceptors)
 (def event-registered? router/handler-registered?)
 (def registered-event-ids router/registered-event-ids)
 (def unreg-event router/unreg-event)
