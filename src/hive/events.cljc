@@ -46,6 +46,7 @@
 (def clear-fx fx/clear-fx)
 (def unreg-fx fx/unreg-fx)
 (def registered-fx-ids fx/registered-fx-ids)
+(def get-fx fx/get-fx)
 (def do-fx fx/do-fx)
 
 ;; The effect-invocation seam. An embedder installs its own policy (metrics,
