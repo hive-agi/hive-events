@@ -24,5 +24,8 @@
         entry    (get registry ::my-ev)]
     (testing "the event is registered with the schema-coerce interceptor first"
       (is (some? entry))
-      (is (= :schema-coerce (:id (first (:interceptors entry)))))
-      (is (some #(= :handler (:id %)) (:interceptors entry))))))
+      (is (= :schema-coerce (:id (first (:interceptors entry))))))
+    (testing "the stored chain is the USER chain; dispatch appends the handler"
+      (is (not (some #(= :handler (:id %)) (:interceptors entry)))
+          "a pre-appended handler-interceptor would run twice once a caller appends its own")
+      (is (fn? (:handler entry))))))

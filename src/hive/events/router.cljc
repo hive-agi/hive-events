@@ -130,16 +130,9 @@
   ([id handler]
    (reg-event-fx id [] handler))
   ([id interceptors handler]
-   (let [interceptors (flatten-interceptors interceptors)
-         handler-interceptor (interceptor/->interceptor
-                              :id :handler
-                              :before (fn [ctx]
-                                        (let [coeffects (:coeffects ctx)
-                                              effects (handler coeffects (:event coeffects))]
-                                          (assoc ctx :effects effects))))]
-     (swap! event-registry assoc id
-            {:interceptors (conj interceptors handler-interceptor)
-             :handler handler}))))
+   (swap! event-registry assoc id
+          {:interceptors (flatten-interceptors interceptors)
+           :handler handler})))
 
 (defn reg-event-db
   "Register an event handler that returns new db value.
@@ -162,6 +155,82 @@
    (swap! event-registry dissoc id)))
 
 ;; =============================================================================
+;; Registry API
+;;
+;; The registry is ONE store. A host that adds its own validation, telemetry or
+;; wrapping does it through this API, so a handler registered by a library
+;; consumer and one registered by the host are the same registration and are
+;; seen by the same dispatch.
+
+(defn get-event
+  "Return the registry entry for `id`, or nil.
+
+   Entry shape: {:interceptors <normalized user chain> :handler <fn>}. The
+   handler-interceptor is NOT part of the stored chain; dispatch appends it, so
+   a caller is free to append its own interceptors without ordering hazard."
+  [id]
+  (get @event-registry id))
+
+(defn handler-registered?
+  "True when an event handler is registered for `id`."
+  [id]
+  (contains? @event-registry id))
+
+(defn registered-event-ids
+  "Set of registered event ids."
+  []
+  (set (keys @event-registry)))
+
+(defn unreg-event
+  "Remove the handler for `id`. Returns true when one was removed."
+  [id]
+  (let [had? (handler-registered? id)]
+    (swap! event-registry dissoc id)
+    had?))
+
+(defn registry-snapshot
+  "Current registry value. For inspection and for save/restore in tests."
+  []
+  @event-registry)
+
+(defn restore-registry!
+  "Replace the whole registry with `handlers`. For test isolation."
+  [handlers]
+  (reset! event-registry handlers))
+
+(defn- chain-has-id?
+  [chain interceptor-id]
+  (boolean (some #(= interceptor-id (:id %)) chain)))
+
+(defn append-interceptor!
+  "Append `interceptor` to the chain of an already-registered `id`.
+
+   Idempotent on the interceptor's :id. Returns true when appended, false when
+   the event is unregistered or the :id is already in the chain."
+  [id interceptor]
+  (let [appended? (volatile! false)]
+    (swap! event-registry
+           (fn [handlers]
+             (if-let [entry (get handlers id)]
+               (if (chain-has-id? (:interceptors entry) (:id interceptor))
+                 handlers
+                 (do (vreset! appended? true)
+                     (assoc handlers id
+                            (update entry :interceptors #(conj (vec %) interceptor)))))
+               handlers)))
+    @appended?))
+
+(defn handler-interceptor
+  "Build the terminal interceptor that invokes `handler` and MERGES its effect
+   map into the context's effects."
+  [handler]
+  (interceptor/->interceptor
+   :id :handler
+   :before (fn [ctx]
+             (let [coeffects (:coeffects ctx)]
+               (update ctx :effects merge (handler coeffects (:event coeffects)))))))
+
+;; =============================================================================
 ;; Dispatch
 
 (defn- create-context
@@ -177,9 +246,10 @@
   "Process a single event through its interceptor chain, then notify observers."
   [event]
   (let [event-id (first event)]
-    (if-let [{:keys [interceptors]} (get @event-registry event-id)]
+    (if-let [{:keys [interceptors handler]} (get @event-registry event-id)]
       (let [context (-> (create-context event)
-                        (interceptor/enqueue interceptors)
+                        (interceptor/enqueue
+                         (conj (vec interceptors) (handler-interceptor handler)))
                         (interceptor/execute))]
         (fx/do-fx (:effects context))
         (observer/notify! event-id context)

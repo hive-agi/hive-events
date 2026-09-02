@@ -58,6 +58,17 @@
 (def dispatch router/dispatch)
 (def dispatch-sync router/dispatch-sync)
 
+;; Registry API. ONE store: a handler registered here is the same registration
+;; a host's own dispatch sees, so an addon depends on this library rather than
+;; on whichever host happens to be running it.
+(def get-event router/get-event)
+(def handler-registered? router/handler-registered?)
+(def registered-event-ids router/registered-event-ids)
+(def unreg-event router/unreg-event)
+(def append-interceptor! router/append-interceptor!)
+(def registry-snapshot router/registry-snapshot)
+(def restore-registry! router/restore-registry!)
+
 ;; Built-in interceptors
 (def debug interceptor/debug)
 (def trim-v interceptor/trim-v)
