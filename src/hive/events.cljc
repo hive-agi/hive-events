@@ -48,6 +48,14 @@
 (def registered-fx-ids fx/registered-fx-ids)
 (def do-fx fx/do-fx)
 
+;; The effect-invocation seam. An embedder installs its own policy (metrics,
+;; tracing, a loud-fail counter for unregistered effects) without this library
+;; knowing what any of those are, and without a second copy of do-fx.
+(def set-fx-executor! fx/set-fx-executor!)
+(def clear-fx-executor! fx/clear-fx-executor!)
+(def fx-executor-installed? fx/fx-executor-installed?)
+(def default-invoke-fx-handler fx/default-invoke-fx-handler)
+
 (def reg-cofx cofx/reg-cofx)
 (def inject-cofx cofx/inject-cofx)
 (def unreg-cofx cofx/unreg-cofx)

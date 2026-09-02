@@ -93,10 +93,12 @@
   [handlers]
   (reset! fx-registry handlers))
 
-(defn- invoke-fx-handler
+(defn default-invoke-fx-handler
   "Look up and invoke a registered fx handler for a single effect.
-   Logs warning if handler not found, catches and logs exceptions.
-   Shared by both `do-fx` (map) and `do-fx-seq` (sequential)."
+   Logs a warning if no handler is registered, catches and logs exceptions.
+   Never throws.
+
+   This is the DEFAULT policy. `set-fx-executor!` replaces it."
   [effect-id effect-value]
   (if-let [handler (get-fx effect-id)]
     (try
@@ -105,19 +107,57 @@
         (log/error "error in fx handler" effect-id e)))
     (log/warn "no fx handler for" effect-id)))
 
+(defonce ^:private fx-executor
+  ^{:doc "The installed effect-invocation policy, or nil for the default."}
+  (atom nil))
+
+(defn set-fx-executor!
+  "Install `f` as the policy that invokes ONE effect: (f effect-id effect-value).
+
+   The policy owns handler lookup and error handling, so an embedder can add
+   metrics, tracing or a loud-fail counter for unregistered effects without the
+   library knowing what any of those are. `default-invoke-fx-handler` is the
+   behaviour to fall back on, and a policy that wants only to observe should
+   call it.
+
+   A policy MUST NOT throw: `do-fx` runs after the interceptor chain has
+   already committed, so a throw here surfaces as a dispatch failure for work
+   that already happened.
+
+   Returns `f`. One executor at a time, last writer wins."
+  [f]
+  (reset! fx-executor f)
+  f)
+
+(defn clear-fx-executor!
+  "Restore the default effect-invocation policy. Returns nil."
+  []
+  (reset! fx-executor nil))
+
+(defn fx-executor-installed?
+  "True when a non-default effect-invocation policy is installed."
+  []
+  (some? @fx-executor))
+
+(defn- invoke-fx-handler
+  "Invoke one effect through the installed policy, or the default.
+   Shared by `do-fx` (map) and `do-fx-seq` (sequential)."
+  [effect-id effect-value]
+  ((or @fx-executor default-invoke-fx-handler) effect-id effect-value))
+
 (defn do-fx
   "Execute all effects in an effects map.
 
-   Processes effects in undefined order (except :db which is always first).
-   Unknown effects are warned about but don't throw."
+   `:db` runs first when present; the rest run in undefined order. Unknown
+   effects are warned about and do not throw.
+
+   Every effect, `:db` included, goes through the installed fx executor
+   (`set-fx-executor!`), so an embedder's metrics and unregistered-effect
+   counters see the whole set rather than all of it except `:db`."
   [effects]
   (when (map? effects)
-    ;; Process :db first if present
-    (when-let [db-effect (get effects :db)]
-      (when-let [handler (get-fx :db)]
-        (handler db-effect)))
-
-    ;; Process remaining effects
+    (when (contains? effects :db)
+      (invoke-fx-handler :db (get effects :db)))
     (doseq [[effect-id effect-value] (dissoc effects :db)]
       (invoke-fx-handler effect-id effect-value))))
 
