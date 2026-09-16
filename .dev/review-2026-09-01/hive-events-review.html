@@ -1,0 +1,283 @@
+<title>hive-events Review</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F5F7F5; --surface:#FFFFFF; --ink:#1A2130; --muted:#5E6875; --rule:#D8DDE2;
+  --accent:#0E7C7B; --accent-ink:#0A5E5D; --accent-soft:#DDF0EE;
+  --crit:#B42318; --crit-soft:#FBE9E7; --warn:#B54708; --warn-soft:#FDF0E3; --ok:#1B7F46; --ok-soft:#E3F4E9;
+  --code-bg:#EDF1EF; --code-ink:#1F2A2A;
+  --display:'Literata', Georgia, 'Times New Roman', serif;
+  --body:'Public Sans', 'Helvetica Neue', Arial, sans-serif;
+  --mono:'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1319; --surface:#161B23; --ink:#E4E8EE; --muted:#98A2AE; --rule:#2A323D;
+    --accent:#3CC9B8; --accent-ink:#8AE3D8; --accent-soft:#12312F;
+    --crit:#F97066; --crit-soft:#3A1A17; --warn:#F5A623; --warn-soft:#3A2A12; --ok:#4ADE80; --ok-soft:#153224;
+    --code-bg:#1B222C; --code-ink:#DCE3E8;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F1319; --surface:#161B23; --ink:#E4E8EE; --muted:#98A2AE; --rule:#2A323D;
+  --accent:#3CC9B8; --accent-ink:#8AE3D8; --accent-soft:#12312F;
+  --crit:#F97066; --crit-soft:#3A1A17; --warn:#F5A623; --warn-soft:#3A2A12; --ok:#4ADE80; --ok-soft:#153224;
+  --code-bg:#1B222C; --code-ink:#DCE3E8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.page{max-width:76rem;margin:0 auto;padding:2.5rem 1.5rem 5rem}
+h1,h2,h3{font-family:var(--display);font-weight:600;line-height:1.15;text-wrap:balance;margin:0}
+h1{font-size:clamp(2rem,4vw,3rem);letter-spacing:-0.01em}
+h2{font-size:1.6rem;margin-top:3.25rem;margin-bottom:1rem;padding-top:1rem;border-top:1px solid var(--rule)}
+h3{font-size:1.15rem;margin-top:1.75rem;margin-bottom:.5rem}
+p{margin:.6rem 0;max-width:68ch}
+.lede{font-size:1.15rem;max-width:62ch;color:var(--ink)}
+.eyebrow{font-family:var(--mono);font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:.9rem}
+a{color:var(--accent-ink);text-decoration:none;border-bottom:1px solid var(--accent-soft)}
+a:hover{border-bottom-color:var(--accent)}
+code,pre{font-family:var(--mono);font-size:.86em}
+code{background:var(--code-bg);color:var(--code-ink);padding:.08em .35em;border-radius:3px}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.1rem;border-radius:6px;overflow-x:auto;line-height:1.5;margin:.9rem 0}
+pre code{background:none;padding:0}
+.verdict{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin:2rem 0 0}
+.verdict > div{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:1.1rem 1.2rem}
+.verdict .k{font-family:var(--mono);font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.5rem}
+.verdict .keep .k{color:var(--ok)} .verdict .fix .k{color:var(--warn)} .verdict .drop .k{color:var(--crit)}
+.verdict ul{margin:.3rem 0 0;padding-left:1.1rem} .verdict li{margin:.25rem 0}
+table{border-collapse:collapse;width:100%;font-size:.93rem;margin:.9rem 0}
+.tablewrap{overflow-x:auto}
+th,td{text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:var(--mono);font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}
+td.num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.chip{display:inline-block;font-family:var(--mono);font-size:.72rem;letter-spacing:.04em;padding:.1em .5em;border-radius:999px;white-space:nowrap;vertical-align:middle}
+.chip.crit{background:var(--crit-soft);color:var(--crit)} .chip.warn{background:var(--warn-soft);color:var(--warn)} .chip.ok{background:var(--ok-soft);color:var(--ok)} .chip.rung{background:var(--accent-soft);color:var(--accent-ink)} .chip.plain{background:var(--code-bg);color:var(--muted)}
+.finding{display:grid;grid-template-columns:9.5rem minmax(0,1fr);gap:1.2rem;padding:1.2rem 0;border-top:1px solid var(--rule)}
+.finding:last-of-type{border-bottom:1px solid var(--rule)}
+.finding .meta{display:flex;flex-direction:column;gap:.4rem;align-items:flex-start}
+.finding h3{margin-top:0}
+.finding .ref{font-family:var(--mono);font-size:.76rem;color:var(--muted);margin-top:.5rem}
+.registries{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.9rem;margin:1rem 0}
+.reg{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:.9rem 1rem;font-size:.9rem}
+.reg .name{font-family:var(--mono);font-size:.8rem;color:var(--accent-ink);margin-bottom:.4rem}
+.reg dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:.2rem .6rem}
+.reg dt{color:var(--muted);font-size:.78rem;font-family:var(--mono)} .reg dd{margin:0}
+.shared{border:1px dashed var(--accent);border-radius:6px;padding:.7rem 1rem;font-family:var(--mono);font-size:.82rem;color:var(--accent-ink);text-align:center;margin-top:.2rem}
+.arrows{text-align:center;color:var(--muted);font-family:var(--mono);font-size:.8rem;margin:.2rem 0}
+.lens td:first-child{white-space:nowrap;font-weight:500}
+.roadmap{counter-reset:step;list-style:none;padding:0;margin:1rem 0}
+.roadmap li{counter-increment:step;display:grid;grid-template-columns:3rem minmax(0,1fr);gap:.8rem;padding:.9rem 0;border-top:1px solid var(--rule)}
+.roadmap li::before{content:counter(step);font-family:var(--display);font-size:1.6rem;color:var(--accent);line-height:1}
+.roadmap li:last-child{border-bottom:1px solid var(--rule)}
+.roadmap b{display:block;margin-bottom:.2rem}
+.small{font-size:.86rem;color:var(--muted)}
+footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);font-size:.86rem;color:var(--muted)}
+footer ul{padding-left:1.1rem;margin:.4rem 0}
+@media (max-width:760px){.verdict,.registries{grid-template-columns:1fr}.finding{grid-template-columns:1fr;gap:.4rem}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="page">
+<div class="eyebrow">Design review · 2026-09-01 · hive-events 0.5.9 · hive-event-protocols 0.1.1</div>
+<h1>Is hive-events still worth keeping?</h1>
+<p class="lede">Yes, as the in-process kernel it already is: an interceptor chain, an effects and coeffects registry, a deterministic FSM with halt and resume, and an observer seam. Fifteen fleet repos call it, and hive-mcp's workflows, hive-agent's lifecycle and hive-workflows' progress stream run on its FSM and registries. No, as the "async event system with sagas" the README describes: the saga bus hears no dispatch, async handlers fail, the whole <code>async</code> namespace has no consumer anywhere, and the wire-protocol sibling never runs under the engine. The library has not fallen behind; it has been carrying claims it does not meet, and three copies of its own dispatch loop.</p>
+
+<div class="verdict">
+  <div class="keep"><div class="k">Keep, it earns its place</div>
+    <ul><li><code>interceptor</code>, <code>fx</code>, <code>cofx</code>: the re-frame kernel, small and correct</li>
+        <li><code>fsm</code>: compile, run, halt/resume, sub-FSM effect capture</li>
+        <li><code>observer</code>: the one open seam, added 0.5.4</li>
+        <li><code>multi</code>'s pure orchestration half (validate, waves)</li></ul></div>
+  <div class="fix"><div class="k">Fix before building on it</div>
+    <ul><li>Three registries, one dispatch contract</li>
+        <li>Saga/pub-sub fed from dispatch, or removed</li>
+        <li><code>:async?</code> handlers real, or removed</li>
+        <li>hive-event-protocols specs ported to the engine's shape</li></ul></div>
+  <div class="drop"><div class="k">Do not build on, as it stands</div>
+    <ul><li><code>hive.events.async/saga</code> as a process manager</li>
+        <li><code>hive.events.async</code> debounce and retry for anything registered outside the router</li>
+        <li>The README's "sagas" and "events over the wire" claims</li></ul></div>
+</div>
+
+<h2>What the library is today</h2>
+<p>Eleven cljc namespaces, no host dependency, three third-party deps (core.async, sci, clojure). The last feature commit was the observer seam on 2026-07-21; everything since is release and dependency hygiene, which is what "left behind" looks like from the outside.</p>
+<div class="tablewrap"><table>
+<tr><th>Namespace</th><th class="num">Lines</th><th>Layer</th><th>Role</th></tr>
+<tr><td><code>hive.events</code></td><td class="num">84</td><td>Facade</td><td>Re-exports; <code>handler-registered?</code> aliases the multi registry, not the router</td></tr>
+<tr><td><code>hive.events.interceptor</code></td><td class="num">174</td><td>Kernel, pure</td><td>Chain execution, <code>execute-async</code>, <code>->timed-interceptor</code> delegating to hive-weave</td></tr>
+<tr><td><code>hive.events.fx</code></td><td class="num">158</td><td>Kernel, boundary</td><td>Global fx registry, <code>do-fx</code> (map, unordered) and <code>do-fx-seq</code> (ordered), <code>*fx-interceptor*</code> capture</td></tr>
+<tr><td><code>hive.events.cofx</code></td><td class="num">119</td><td>Kernel</td><td>Global cofx registry, <code>inject-cofx</code></td></tr>
+<tr><td><code>hive.events.router</code></td><td class="num">294</td><td>Registry 1</td><td><code>reg-event-fx</code>, app-db atom-of-atom, JVM go-loop queue with thread-binding capture</td></tr>
+<tr><td><code>hive.events.multi</code></td><td class="num">503</td><td>Registry 2 + orchestration</td><td>Multimethod handler registry (top half) and pure multi-op wave compiler (bottom half); two subsystems in one file</td></tr>
+<tr><td><code>hive.events.fsm</code></td><td class="num">573</td><td>Engine</td><td>maestro port: compile with SCI predicates, run, halt/resume, sub-FSM, transition tap</td></tr>
+<tr><td><code>hive.events.async</code></td><td class="num">193</td><td>JVM extras</td><td>timeout, retry, debounce, throttle, private pub/sub, saga; all router-bound</td></tr>
+<tr><td><code>hive.events.observer</code></td><td class="num">94</td><td>Seam</td><td><code>IEventObserver</code> protocol, isolated notify after effects</td></tr>
+<tr><td><code>hive.events.schema</code></td><td class="num">52</td><td>Boundary</td><td>Payload coercion via hive-spi, lazily resolved, pass-through when absent</td></tr>
+<tr><td><code>hive.events.log</code></td><td class="num">59</td><td>Plumbing</td><td>Pluggable log fn</td></tr>
+</table></div>
+
+<h2>Evidence, by rung</h2>
+<p>Every claim below carries the rung it was measured at. "Confirmed" means a cold JVM ran it today; "plausible" means it is read from the code and not yet executed.</p>
+<div class="tablewrap"><table>
+<tr><th>Instrument</th><th>Result</th><th>What it proves</th></tr>
+<tr><td>hive-events <code>clojure -M:test</code></td><td class="num">132 tests, 307 assertions, 0 failures</td><td>The kernel, FSM, multi compiler and observer behave as their tests state</td></tr>
+<tr><td>hive-event-protocols suite, local hive-events</td><td class="num">210 tests, 1120 assertions, 0 failures</td><td>Every state handler works in isolation; nothing about the machine</td></tr>
+<tr><td><code>(proto/compiled (tcp/make-tcp-fsm))</code></td><td>only <code>::end ::halt ::error</code></td><td>Six transports compile to an empty machine</td></tr>
+<tr><td><code>(proto/run-session tcp ...)</code></td><td>throws at <code>::fsm/start</code></td><td>They cannot run</td></tr>
+<tr><td>saga + <code>dispatch</code> / <code>dispatch-sync</code></td><td>saga saw nothing; <code>publish-event</code> only</td><td>The saga bus is disconnected from dispatch</td></tr>
+<tr><td><code>:async? true</code> handler, deferred callback</td><td>lands in <code>::error</code></td><td>Async handlers are nominal</td></tr>
+<tr><td>halt then resume</td><td>resumes, <code>{:n 2}</code></td><td>Halt/resume is the real durable-workflow primitive</td></tr>
+</table></div>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <div class="meta"><span class="chip crit">critical</span><span class="chip rung">confirmed</span></div>
+  <div><h3>hive-event-protocols never runs under the engine</h3>
+  <p>Six of seven transports (tcp, tls, http1, http2, http3, websocket) write their machine as <code>{:id :initial :states {k {:enter :handle :dispatch}}}</code>. The engine reads <code>{:fsm {k {:handler :dispatches}}}</code> and starts at <code>::fsm/start</code>. Compilation silently yields the three privileged states and nothing else; a session throws on its first step. Only <code>retry.clj</code> speaks the engine's dialect, and it runs. The suite is green because every test calls handlers directly and asserts on the spec's state count; no test calls <code>run-session</code>. This is the Evidence Stratification attractor in its purest form: written, unit-tested, never executed.</p>
+  <div class="ref">memory 20260901171813-5d276d7b · card 20260901171858-0ca0b877</div></div>
+</div>
+
+<div class="finding">
+  <div class="meta"><span class="chip crit">critical</span><span class="chip rung">confirmed</span></div>
+  <div><h3>Three event registries in one JVM, one shared fx registry</h3>
+  <p>The router (<code>reg-event-fx</code>), the multimethod registry (<code>register-handler!</code>) and hive-mcp's own (<code>reg-event</code>) each hold handlers, each re-implement the same handler-interceptor plus execute plus do-fx loop, and each decide differently what an unhandled event means: warn and drop, throw, throw with a boot check. All three write effects into the one global fx registry, and hive-mcp reaches into the private cofx atom by <code>resolve</code>. Every async helper (debounce, retry, saga) targets the router only. The result is the diagnostic that already misled one session: <code>handler-registered?</code> says false for an event that dispatches fine, because it asks a registry dispatch does not consult. This is a Single-Source Lever fault. The fix is one registry contract and a dispatch policy passed as data, not a fourth registry and not more cross-patching.</p>
+  <div class="ref">memory 20260901171831-58b3e762 · card 20260901171914-12778392 · refines 20260721173157-1ba86601, 20260821230335-144f976f</div></div>
+</div>
+
+<div class="finding">
+  <div class="meta"><span class="chip warn">high</span><span class="chip rung">confirmed</span></div>
+  <div><h3>The saga is a go-loop over a bus nothing feeds</h3>
+  <p><code>hive.events.async</code> keeps a private <code>pub</code> that only <code>publish-event</code> writes to. The router never publishes, so the README's saga example, reacting to <code>:order/created</code> and <code>:payment/completed</code>, reacts to nothing. The state is an in-memory map in a go-block: no correlation id, no persistence, no timeout, no compensation. It is a subscriber, not a process manager. The observer seam added in 0.5.4 is the honest replacement and one <code>GlobalObserver</code> would connect the bus in a line.</p>
+  <div class="ref">memory 20260901171821-2caf8817 · card 20260901171904-4f390f2b</div></div>
+</div>
+
+<div class="finding">
+  <div class="meta"><span class="chip warn">high</span><span class="chip rung">confirmed</span></div>
+  <div><h3><code>:async? true</code> FSM handlers do not work</h3>
+  <p><code>run</code> hands the handler <code>identity</code> as its callback and then uses the handler's return value. A handler that returns nil and calls back later transitions on nil and lands in <code>::error</code>. The flag only "works" for a handler that returns the callback's result synchronously, which is not async. Either await a promise or channel from the callback, or delete the flag and the normalize shim.</p>
+  <div class="ref">same memory and card as above</div></div>
+</div>
+
+<div class="finding">
+  <div class="meta"><span class="chip warn">high</span><span class="chip rung">confirmed</span></div>
+  <div><h3>Three namespaces have no consumer in the fleet</h3>
+  <p>A require-site sweep over every repo that pins hive-events finds no caller of <code>hive.events.async</code>, <code>hive.events.log</code> or <code>hive.events.schema</code> outside the library's own tests. Timeout, retry, debounce, throttle, pub/sub and saga are dead code in production, which turns the two findings above from "fix" into "delete": remove <code>async</code> in 0.6.0 and let hive-weave own retry and timeout, as <code>->timed-interceptor</code> already does. <code>schema</code> is a good seam that nobody found; fold it into the router as an opt-in and document it. <code>log</code> is fine as plumbing.</p>
+  <div class="ref">fleet sweep 2026-09-01, memory 20260901172456-1ee37042 (consumer map)</div></div>
+</div>
+
+<div class="finding">
+  <div class="meta"><span class="chip warn">medium</span><span class="chip rung">plausible</span></div>
+  <div><h3>Unhandled events are a policy, and the library picked the worst one</h3>
+  <p>The router warns and returns nil; nothing is retried, counted or surfaced. The loud-fail work (ENGINE-L0.4) shipped as <code>verify-handlers!</code> in hive-mcp, so only hive-mcp's registry has a boot check. Library users still get the warn-and-drop that absorbed a retry storm once. Under a unified registry the policy becomes an injected strategy: <code>{:on-unhandled :warn | :throw | :dead-letter}</code>.</p></div>
+</div>
+
+<div class="finding">
+  <div class="meta"><span class="chip warn">medium</span><span class="chip rung">plausible</span></div>
+  <div><h3>Backpressure is an assertion error</h3>
+  <p><code>dispatch</code> does <code>put!</code> on a 1024-buffer channel. Past the buffer, core.async queues pending puts up to 1024 more, then throws. A burst of unprocessed events crashes the emitter instead of blocking or dropping by policy. <code>:dispatch-later</code> spawns a future per delayed event. Neither matters in-process today; both matter the moment events cross a process boundary.</p></div>
+</div>
+
+<div class="finding">
+  <div class="meta"><span class="chip plain">low</span><span class="chip rung">confirmed</span></div>
+  <div><h3>Effect order is undefined, except <code>:db</code></h3>
+  <p><code>do-fx</code> iterates a map; only the FSM's <code>do-fx-seq</code> preserves order. A handler that returns <code>{:dispatch ... :log ...}</code> cannot rely on the log landing first. The FSM already has the ordered form; the router should accept a vector of pairs as well and document the map form as unordered.</p></div>
+</div>
+
+<div class="finding">
+  <div class="meta"><span class="chip plain">low</span><span class="chip rung">confirmed</span></div>
+  <div><h3><code>hive.events.multi</code> is two libraries in one file</h3>
+  <p>The top half is a handler registry with interceptors; the bottom half is a pure DAG compiler (normalize, validate with Kahn, batch fan-out, waves) that exists for hive-mcp's <code>multi</code> tool and has nothing to do with events. The compiler is good code and well tested, which is the argument for moving it to its own namespace, not for leaving it here.</p></div>
+</div>
+
+<h2>The three registries, drawn</h2>
+<div class="registries">
+  <div class="reg"><div class="name">1 · hive.events.router</div>
+    <dl><dt>register</dt><dd><code>reg-event-fx</code>, <code>reg-event-db</code></dd><dt>dispatch</dt><dd><code>dispatch</code> (queue), <code>dispatch-sync</code></dd><dt>unhandled</dt><dd>warn, notify observers, nil</dd><dt>extras</dt><dd>app-db, async helpers, schema coercion</dd></dl></div>
+  <div class="reg"><div class="name">2 · hive.events.multi</div>
+    <dl><dt>register</dt><dd><code>register-handler!</code> (multimethod + meta atom)</dd><dt>dispatch</dt><dd><code>dispatch-multi</code></dd><dt>unhandled</dt><dd>throw</dd><dt>extras</dt><dd>effects merged; nil breaks merge-with</dd></dl></div>
+  <div class="reg"><div class="name">3 · hive-mcp.events.registry</div>
+    <dl><dt>register</dt><dd><code>reg-event [id ics h]</code>, <code>append-interceptor!</code></dd><dt>dispatch</dt><dd><code>hive-mcp.events.dispatch/dispatch</code></dd><dt>unhandled</dt><dd>throw; boot <code>verify-handlers!</code></dd><dt>extras</dt><dd>malli validation, Prometheus, observers</dd></dl></div>
+</div>
+<div class="arrows">all three write into</div>
+<div class="shared">hive.events.fx/fx-registry · hive.events.cofx/cofx-registry · hive.events.observer/registry (global defonce atoms)</div>
+<p class="small">Who uses which: hive-ingestor and library users register in 1; hive-agent's <code>emit!</code> in 2; hive-mcp's whole bus, the hook bridge and carto's <code>:file/write</code> in 3. hive-cache subscribes through the observer, which both 1 and 3 notify and 2 does not.</p>
+
+<h2>Through the four lenses</h2>
+<div class="tablewrap"><table class="lens">
+<tr><th>Lens</th><th>Holds</th><th>Breaks</th></tr>
+<tr><td>CPPB / Stratified Design</td><td>The interceptor chain, the multi-op compiler and the FSM transition logic are pure Promote and Pipeline strata; effects sit only in <code>do-fx</code>, <code>do-fx-seq</code> and the router queue. The fsm's <code>{:data :fx}</code> return is CPPB in one map.</td><td>Boundary is not one thin function but three copies (router, multi, hive-mcp dispatch). The fx registry is a global defonce, so the Boundary is ambient state rather than an injected effect fn; <code>*fx-interceptor*</code> is a dynamic-var patch over that.</td></tr>
+<tr><td>DDD</td><td>Events as data vectors, handlers as pure decisions, the FSM as an explicit aggregate lifecycle with a trace. The event taxonomy work in hive-agent and hive-workflows treats event ids as a ubiquitous language.</td><td>No event envelope: an event is <code>[:id payload]</code> with no event id, occurred-at, correlation id, causation id, or version. No aggregate boundary: app-db is one atom. No repository or event store port. "Saga" is used for a subscriber. Nothing here can be replayed or audited.</td></tr>
+<tr><td>SOLID</td><td>OCP is real where it matters: the observer protocol, fx and cofx registration, the multimethod registry, the strategy-as-data FSM specs. DIP holds: hive-weave and hive-spi are reached lazily, never required.</td><td>SRP: <code>multi</code> holds two systems; <code>router</code> holds registry, queue, app-db and default fx wiring. ISP/LSP: three registries with three contracts for one role. DIP breaks at hive-mcp's <code>resolve</code> into private atoms. Cardinality: "which registry" is a closed set of three with no protocol over it.</td></tr>
+<tr><td>Design canon</td><td>Capture-by-Var is respected in the facade (<code>def</code> of fns, resolved at call). Co-Tenancy is visible in <code>stop!</code>'s bounded wait and the with-bindings capture.</td><td>Single-Source Lever: three dispatch loops, two <code>unreg-fx</code>, two <code>handler-registered?</code> with different answers. Evidence Stratification: two green suites over unexecuted claims.</td></tr>
+</table></div>
+
+<h2>Seams for a microservices shape</h2>
+<p>Today an event never leaves the JVM through hive-events. hive-mcp publishes spawn and kill to NATS through its own bridge, outside the bus; hive-cache invalidates through the observer; hive-event-protocols is a set of wire-level connection FSMs (TCP handshake, TLS, HTTP framing), not an event transport, and it is not runnable. So the answer to "should we build seams" is yes, but small, and in a specific order, because most of what a distributed bus needs is missing at the data level before it is missing at the transport level.</p>
+
+<h3>What exists that a seam can stand on</h3>
+<ul>
+<li><code>IEventObserver</code>: a clean, isolated tap after effects. An outbox writer is one observer.</li>
+<li><code>fsm</code> halt/resume: a state machine can be parked as data and resumed later, which is the core of a durable process.</li>
+<li><code>hive.events.schema</code>: payload coercion against a registered malli key, already lazy and platform-safe.</li>
+<li><code>IProtocolFSM</code> and <code>ITransport</code> in hive-event-protocols: the right idea, wrong layer for events; keep them for connections.</li>
+</ul>
+
+<h3>What is missing, in dependency order</h3>
+<ol>
+<li><b>Envelope.</b> A malli <code>Event</code> value object: <code>event-id</code> (uuid), <code>type</code>, <code>payload</code>, <code>occurred-at</code>, <code>correlation-id</code>, <code>causation-id</code>, <code>source</code>, <code>version</code>. The vector form <code>[type payload]</code> stays as the in-process projection of it; nothing crosses a boundary without the envelope.</li>
+<li><b>Transport port.</b> <code>IEventTransport</code> with <code>publish!</code>, <code>subscribe!</code>, <code>ack!</code>, <code>close!</code>, provider behaviour as data (at-most-once, at-least-once, ordering, max payload), exactly the profile-in-registry pattern from the clj-subsystem canon. The in-memory transport is the reference implementation and the test double. NATS JetStream is a separate leaf lib, never a hive-events dependency.</li>
+<li><b>Outbox and inbox.</b> An observer that appends published envelopes to an outbox port; a subscriber that checks an inbox port by <code>event-id</code> before dispatching. Idempotent consumers are a policy on the unified dispatch, not a convention in every handler.</li>
+<li><b>Dead letters.</b> The unhandled and failed-handler policy routes to a dead-letter port instead of stderr.</li>
+</ol>
+<p>None of these need a broker to be designed or tested. All of them need the single registry first, or the outbox observer will fire for the router and stay silent for hive-agent's events.</p>
+
+<h2>Sagas, if the word is going to mean something</h2>
+<p>A saga in the Garcia-Molina sense is a sequence of local transactions with a compensating transaction per step; a process manager is the routing state that drives it from events. hive-events has the pieces for the second and none of the first. The honest design is an FSM per saga instance, keyed by correlation id, whose handlers return <code>{:data :fx}</code> where the fx are commands to other services and where every forward step registers its compensation as data in the FSM's state. Timeouts are <code>::halt</code> plus a scheduled resume; failures transition to a compensating branch that replays the registered compensations in reverse as ordered effects through <code>do-fx-seq</code>. Persistence is a port (<code>ISagaStore</code>: load, save, list-pending), and the trigger is the observer feeding an event whose correlation id matches a parked instance.</p>
+<p>That is a new namespace, <code>hive.events.saga</code>, built on <code>fsm</code>, <code>observer</code> and the envelope, with the store injected. It replaces <code>hive.events.async/saga</code>, which should be deleted rather than repaired. It also gives hive-workflows and the payment work a shared spine for the multi-service flows they are already sketching by hand.</p>
+
+<h2>Recommended order</h2>
+<ol class="roadmap">
+<li><div><b>0.6.0, honesty release.</b> One registry contract with dispatch policy as data; router and multi become two registrations of it (or multi's registry is deleted and hive-agent's <code>emit!</code> moves to the router with per-event interceptors it already supports). <code>handler-registered?</code> answers for the registry dispatch uses. Delete <code>hive.events.async</code> (no consumers) and the <code>:async?</code> flag. Public <code>unreg-fx</code> / <code>unreg-cofx</code> already exist, so hive-mcp's private-atom reach becomes a call. <code>do-fx</code> accepts ordered pairs. Move the multi-op compiler to <code>hive.events.plan</code>. README rewritten to the measured surface.</div></li>
+<li><div><b>hive-event-protocols 0.2.0.</b> Port six specs to the engine's dialect, one <code>run-session</code> test per transport. Until then, retag the fleet index so nothing routes to it for "events over the wire".</div></li>
+<li><div><b>0.7.0, envelope and transport port.</b> Malli <code>Event</code> envelope, <code>IEventTransport</code> with an in-memory reference, outbox and inbox observers over injected ports, dead-letter policy. hive-mcp's NATS bridge becomes the first external adapter, in hive-mcp.</div></li>
+<li><div><b>0.8.0, saga on the FSM.</b> <code>hive.events.saga</code>: correlation-keyed FSM instances, compensations as state, halt-based timeouts, <code>ISagaStore</code>. First consumer: the payment settlement flow already on the board.</div></li>
+</ol>
+<p class="small">Each step is a card or a card to be cut. Steps 1 and 2 are on the board now; 3 and 4 are gated on 1 and are proposals until the registry lands.</p>
+
+<h2 id="consumers">Who depends on it, and how hard</h2>
+<div id="consumers-body">
+<p>From a require-site sweep over every repo whose deps.edn names hive-events (carto has no cross-repo call edges for a library pulled by coordinate, so this rung is "source sweep", not "call graph"). Two pins are nominal, one downstream lib has no consumers of its own, and the weight is concentrated in two hosts.</p>
+<div class="tablewrap"><table>
+<tr><th>Repo</th><th class="num">Require sites</th><th>What it leans on</th><th>Weight</th></tr>
+<tr><td>hive-mcp (and its worktree)</td><td class="num">41</td><td><code>fsm</code> ×20: every workflow (<code>plan/fsm</code>, <code>saa_workflow</code>, <code>sub_fsms/*</code>, <code>fsm_engine</code>) plus EDN specs under <code>resources/fsm/</code>; <code>fx</code>, <code>cofx</code>, <code>interceptor</code>, <code>observer</code>; its own registry and dispatch</td><td><span class="chip crit">structural</span></td></tr>
+<tr><td>hive-agent</td><td class="num">18</td><td><code>register-handler!</code> ×20, <code>dispatch-multi</code>, <code>reg-fx</code>; three domain FSMs (llm request, compression, auth); a full <code>events/</code> adapter with handler composition</td><td><span class="chip crit">structural</span></td></tr>
+<tr><td>hive-carto-flow</td><td class="num">9</td><td><code>observer</code> only; the flow timeline has no other input</td><td><span class="chip warn">load-bearing</span></td></tr>
+<tr><td>hive-workflows</td><td class="num">8</td><td>Sole user of <code>fsm/set-transition-tap!</code>; taps feed a real <code>:ws</code>/<code>:nats</code> progress transport (<code>hive.v1.progress.*</code>)</td><td><span class="chip warn">design-critical</span></td></tr>
+<tr><td>hive-knowledge</td><td class="num">6</td><td>Forge-belt FSM spec, <code>IEventObserver</code> for kondo sync, interceptors, soft resolve of <code>->timed-interceptor</code></td><td>moderate</td></tr>
+<tr><td>hive-system</td><td class="num">4</td><td><code>reg-event-fx</code> end to end, plus journal and timing interceptors</td><td>moderate</td></tr>
+<tr><td>hive-tmux</td><td class="num">4</td><td>Pane lifecycle bus, <code>reg-event-fx</code> ×9, <code>dispatch</code> ×5</td><td>moderate</td></tr>
+<tr><td>hive-cache</td><td class="num">3</td><td>Subscriber-only invalidation adapter over <code>reg-event-fx</code></td><td>light</td></tr>
+<tr><td>hive-hot</td><td class="num">3</td><td>Emitter-only adapter (<code>:file/changed</code>, <code>:hot/reload-*</code>)</td><td>light</td></tr>
+<tr><td>hive-carto</td><td class="num">3</td><td>Soft seam via untracked local deps; the one place threading a correlation id</td><td>light, optional</td></tr>
+<tr><td>hive-assay</td><td class="num">2</td><td>One post-commit bridge to a projector port</td><td>light</td></tr>
+<tr><td>hive-event-protocols</td><td class="num">2</td><td><code>fsm</code> only, in <code>retry</code>; nothing in the fleet consumes it</td><td>light, no consumers</td></tr>
+<tr><td>hive-ttracking</td><td class="num">2</td><td>One <code>dispatch</code> behind a defensive wrapper</td><td>light</td></tr>
+<tr><td>hive-ingestor</td><td class="num">1</td><td><code>reg-event-fx</code>, <code>dispatch-sync</code>, two fx in one namespace</td><td>light</td></tr>
+<tr><td>hive-universe</td><td class="num">0 static</td><td><code>requiring-resolve</code> only; a weight test forbids a static require because hive-events pulls core.async and SCI transitively</td><td>optional by policy</td></tr>
+<tr><td>hive-cljs, hive-proximum</td><td class="num">0</td><td>deps.edn pin and a comment, no code</td><td>nominal</td></tr>
+</table></div>
+<p>Two things the sweep settles. The FSM is the load-bearing half of the library: twenty of hive-mcp's forty-one sites and every workflow spec are FSM graphs, which is why the halt/resume asset matters more than the router. And the fleet already wrote the adapters the library lacks: hive-agent's composition over <code>register-handler!</code>, hive-system's journal interceptor, hive-workflows' NATS transport, hive-carto's correlation ids. The 0.7.0 seams are mostly a matter of pulling those four back into one place.</p>
+<p class="small">hive-universe's weight test is a design signal on its own: SCI is a hard dependency carried for EDN predicate evaluation in <code>fsm/compile</code>, and every consumer pays for it. Resolving SCI lazily, the way hive-weave and hive-spi already are, would let the kernel stay on core.async alone.</p>
+</div>
+
+<footer>
+<div>Evidence and follow-ups</div>
+<ul>
+<li>Memory: 20260901172522-4134fbda (this review), 20260901172456-1ee37042 (consumer map), 20260901171813-5d276d7b (protocols dialect), 20260901171821-2caf8817 (saga and async), 20260901171831-58b3e762 (three registries)</li>
+<li>Cards: 20260901171858-0ca0b877 [HEP-FSM-DIALECT], 20260901171904-4f390f2b [HIVE-EVENTS-NOMINAL], 20260901171914-12778392 [HIVE-EVENTS-ONE-REGISTRY]</li>
+<li>Probe logs: hive-events/.dev/review-2026-09-01/</li>
+<li>Prior decisions this review stands on: 20260207145751-557470d5 (hive-events stays lean), 20260426173639-4abf1bd4 and 20260426183250-0e4c5115 (hive-agent E1/E2), 20260627150844-58b961d8 (workflow event taxonomy)</li>
+</ul>
+</footer>
+</div>
