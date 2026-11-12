@@ -14,6 +14,40 @@
                      (fsm/run))]
       (is (= 4 (:count result))))))
 
+;; ── SCI is paid for only by EDN predicates ──────────────────────────────────
+
+(deftest edn-dispatch-predicates-still-compile-and-run
+  (testing "a quoted predicate form is evaluated (by SCI) into a working fn"
+    (let [result (-> (fsm/compile
+                      {:fsm {::fsm/start {:handler    (fn [_resources data]
+                                                        (update data :count (fnil inc 0)))
+                                          :dispatches [[::fsm/end '(fn [state] (> (:count state) 3))]
+                                                       [::fsm/start '(constantly true)]]}}})
+                     (fsm/run))]
+      (is (= 4 (:count result))))))
+
+(deftest fn-dispatch-predicates-never-build-an-evaluator
+  (testing "an all-fn spec compiles without asking for the EDN evaluator"
+    (let [asked (atom 0)
+          factory (fn [] (swap! asked inc) (throw (ex-info "evaluator built" {})))
+          compiled (#'fsm/compile-dispatches
+                    {:fsm {::fsm/start {:handler    (fn [_r data] data)
+                                        :dispatches [[::fsm/end (constantly true)]]}}}
+                    factory)]
+      (is (= 0 @asked))
+      (is (fn? (-> compiled :fsm ::fsm/start :dispatches first second)))))
+  (testing "one EDN predicate builds the evaluator exactly once"
+    (let [asked (atom 0)
+          factory (fn [] (swap! asked inc) (fn [_form] (constantly true)))
+          compiled (#'fsm/compile-dispatches
+                    {:fsm {::fsm/start {:handler    (fn [_r data] data)
+                                        :dispatches [[:next '(constantly true)]]}
+                           :next       {:handler    (fn [_r data] data)
+                                        :dispatches [[::fsm/end '(constantly true)]]}}}
+                    factory)]
+      (doall (mapcat :dispatches (vals (:fsm compiled))))
+      (is (= 1 @asked)))))
+
 (deftest fsm-with-resources
   (testing "FSM handlers can use resources map"
     (let [result (-> (fsm/compile
