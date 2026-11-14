@@ -1,7 +1,10 @@
 {:paths ["src"]
  :deps {org.clojure/clojure {:mvn/version "1.12.6"}
         org.clojure/core.async {:mvn/version "1.9.865"}
-        org.babashka/sci {:mvn/version "0.15.59"}}
+        org.babashka/sci {:mvn/version "0.15.59"}
+
+        ;; Result types, rescue/guard DSL
+        io.github.hive-agi/hive-dsl {:mvn/version "0.5.37"}}
 
  :aliases
  {:dev {:extra-paths ["dev" "test"]
