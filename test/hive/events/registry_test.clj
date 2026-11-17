@@ -111,10 +111,24 @@
     (is (= #{} dupes)
         (str "these names are def'd more than once in hive.events: " dupes))))
 
-(deftest facade-registry-exports-point-at-the-router-test
-  (is (identical? (var-get #'hive.events/event-registered?) router/handler-registered?))
-  (is (identical? (var-get #'hive.events/get-event) router/get-event))
-  (is (identical? (var-get #'hive.events/unreg-event) router/unreg-event)))
+(deftest facade-registry-exports-reach-the-router-test
+  ;; The facade DELEGATES to the router rather than capturing its fns. Storing
+  ;; the fn object (`(def get-event router/get-event)`) freezes it: a reload of
+  ;; the router would leave every caller entering through `hive.events` on the
+  ;; old code. So assert BEHAVIOUR through the facade, and that each entry is a
+  ;; var holding an IFn -- never `identical?` against the router's fn.
+  (doseq [sym '[event-registered? get-event unreg-event]]
+    (let [v (ns-resolve 'hive.events sym)]
+      (is (var? v) (str sym " is a var"))
+      (is (ifn? @v) (str sym " holds an IFn, not a captured fn object"))))
+  (router/reg-event-fx ::via-facade (fn [_ _] {}))
+  (try
+    (is (true? (hive.events/event-registered? ::via-facade))
+        "the facade reads the router's ONE store")
+    (is (some? (hive.events/get-event ::via-facade)))
+    (is (true? (hive.events/unreg-event ::via-facade)))
+    (is (false? (hive.events/event-registered? ::via-facade)))
+    (finally (router/unreg-event ::via-facade))))
 
 (deftest snapshot-restore-round-trips-test
   (router/reg-event-fx ::a (fn [_ _] {}))
