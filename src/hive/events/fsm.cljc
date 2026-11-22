@@ -43,8 +43,7 @@
 
    Based on yogthos/maestro v0.2.1 (MIT License)."
   (:refer-clojure :exclude [compile])
-  #?(:clj (:require [sci.core :as sci]
-                    [hive.events.fx :as fx])
+  #?(:clj (:require [hive.events.fx :as fx])
      :cljs (:require [sci.core :as sci]
                      [hive.events.fx :as fx])))
 
@@ -99,30 +98,47 @@
     (throw (ex-info (str "missing dispatches for state " id) {:id id :spec spec}))))
 
 (defn- compile-state-handler
-  "Compile a single state: normalize handler, eval dispatch predicates via SCI."
-  [state-id {:keys [handler dispatches async?]} sci-ctx valid-targets]
+  "Compile a single state: normalize handler, eval EDN dispatch predicates with
+   `edn-eval` (a delay of form -> fn, forced only by a non-fn predicate)."
+  [state-id {:keys [handler dispatches async?]} edn-eval valid-targets]
   {:handler    (normalize-handler state-id handler async?)
-   :dispatches (for [[target pred] dispatches]
-                 (if-not (contains? valid-targets target)
-                   (throw (ex-info (str "invalid dispatch target " target " from state " state-id)
-                                   {:id state-id :target target}))
-                   [target (if (fn? pred)
-                             pred
-                             (sci/eval-form sci-ctx pred))]))})
+   :dispatches (mapv (fn [[target pred]]
+                       (if-not (contains? valid-targets target)
+                         (throw (ex-info (str "invalid dispatch target " target " from state " state-id)
+                                         {:id state-id :target target}))
+                         [target (if (fn? pred)
+                                   pred
+                                   (@edn-eval pred))]))
+                     dispatches)})
+
+(defn- sci-evaluator
+  "The default EDN predicate evaluator: a fresh SCI context, form -> value.
+   On the JVM sci.core is resolved here, on first use, so a consumer whose
+   predicates are all fns (every `(require 'hive.events)`) never loads SCI."
+  []
+  #?(:clj (let [init (requiring-resolve 'sci.core/init)
+                eval-form (requiring-resolve 'sci.core/eval-form)
+                ctx (init {})]
+            (fn [form] (eval-form ctx form)))
+     :cljs (let [ctx (sci/init {})]
+             (fn [form] (sci/eval-form ctx form)))))
 
 (defn- compile-dispatches
-  "Compile all dispatch predicates in the FSM spec."
-  [spec]
-  (let [sci-ctx       (sci/init {})
-        valid-targets (-> spec :fsm keys set (conj ::end ::halt ::error))]
-    (update spec :fsm
-            (fn [fsm]
-              (reduce-kv
-               (fn [acc id state-spec]
-                 (validate-state-spec id state-spec)
-                 (assoc acc id (compile-state-handler id state-spec sci-ctx valid-targets)))
-               {}
-               fsm)))))
+  "Compile all dispatch predicates in the FSM spec. `evaluator-factory` builds
+   the EDN predicate evaluator; it is called at most once, and only when some
+   predicate is not already a fn."
+  ([spec] (compile-dispatches spec sci-evaluator))
+  ([spec evaluator-factory]
+   (let [edn-eval      (delay (evaluator-factory))
+         valid-targets (-> spec :fsm keys set (conj ::end ::halt ::error))]
+     (update spec :fsm
+             (fn [fsm]
+               (reduce-kv
+                (fn [acc id state-spec]
+                  (validate-state-spec id state-spec)
+                  (assoc acc id (compile-state-handler id state-spec edn-eval valid-targets)))
+                {}
+                fsm))))))
 
 ;; =============================================================================
 ;; Compile
