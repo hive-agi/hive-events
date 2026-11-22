@@ -38,35 +38,35 @@
             [hive.events.staleness :as staleness]))
 
 ;; Re-export core API
-(def ->interceptor interceptor/->interceptor)
-#?(:clj (def ->timed-interceptor interceptor/->timed-interceptor))
-(def enqueue interceptor/enqueue)
-(def execute interceptor/execute)
+(defn ->interceptor [& args] (apply interceptor/->interceptor args))
+#?(:clj (defn ->timed-interceptor [& args] (apply interceptor/->timed-interceptor args)))
+(defn enqueue [& args] (apply interceptor/enqueue args))
+(defn execute [& args] (apply interceptor/execute args))
 
-(def reg-fx fx/reg-fx)
-(def clear-fx fx/clear-fx)
-(def unreg-fx fx/unreg-fx)
-(def registered-fx-ids fx/registered-fx-ids)
-(def get-fx fx/get-fx)
-(def do-fx fx/do-fx)
+(defn reg-fx [& args] (apply fx/reg-fx args))
+(defn clear-fx [& args] (apply fx/clear-fx args))
+(defn unreg-fx [& args] (apply fx/unreg-fx args))
+(defn registered-fx-ids [& args] (apply fx/registered-fx-ids args))
+(defn get-fx [& args] (apply fx/get-fx args))
+(defn do-fx [& args] (apply fx/do-fx args))
 
 ;; The effect-invocation seam. An embedder installs its own policy (metrics,
 ;; tracing, a loud-fail counter for unregistered effects) without this library
 ;; knowing what any of those are, and without a second copy of do-fx.
-(def set-fx-executor! fx/set-fx-executor!)
-(def clear-fx-executor! fx/clear-fx-executor!)
-(def fx-executor-installed? fx/fx-executor-installed?)
-(def default-invoke-fx-handler fx/default-invoke-fx-handler)
+(defn set-fx-executor! [& args] (apply fx/set-fx-executor! args))
+(defn clear-fx-executor! [& args] (apply fx/clear-fx-executor! args))
+(defn fx-executor-installed? [& args] (apply fx/fx-executor-installed? args))
+(defn default-invoke-fx-handler [& args] (apply fx/default-invoke-fx-handler args))
 
-(def reg-cofx cofx/reg-cofx)
-(def inject-cofx cofx/inject-cofx)
-(def unreg-cofx cofx/unreg-cofx)
-(def registered-cofx-ids cofx/registered-cofx-ids)
+(defn reg-cofx [& args] (apply cofx/reg-cofx args))
+(defn inject-cofx [& args] (apply cofx/inject-cofx args))
+(defn unreg-cofx [& args] (apply cofx/unreg-cofx args))
+(defn registered-cofx-ids [& args] (apply cofx/registered-cofx-ids args))
 
-(def reg-event-fx router/reg-event-fx)
-(def reg-event-db router/reg-event-db)
-(def dispatch router/dispatch)
-(def dispatch-sync router/dispatch-sync)
+(defn reg-event-fx [& args] (apply router/reg-event-fx args))
+(defn reg-event-db [& args] (apply router/reg-event-db args))
+(defn dispatch [& args] (apply router/dispatch args))
+(defn dispatch-sync [& args] (apply router/dispatch-sync args))
 
 ;; Registry API. ONE store: a handler registered here is the same registration
 ;; a host's own dispatch sees, so an addon depends on this library rather than
@@ -74,42 +74,42 @@
 ;; `event-registered?` and not `handler-registered?`: that name is already taken
 ;; below by the multimethod-dispatch subsystem, and a second def would silently
 ;; shadow it.
-(def get-event router/get-event)
-(def get-interceptors router/get-interceptors)
-(def event-registered? router/handler-registered?)
-(def registered-event-ids router/registered-event-ids)
-(def unreg-event router/unreg-event)
-(def append-interceptor! router/append-interceptor!)
-(def registry-snapshot router/registry-snapshot)
-(def restore-registry! router/restore-registry!)
+(defn get-event [& args] (apply router/get-event args))
+(defn get-interceptors [& args] (apply router/get-interceptors args))
+(defn event-registered? [& args] (apply router/handler-registered? args))
+(defn registered-event-ids [& args] (apply router/registered-event-ids args))
+(defn unreg-event [& args] (apply router/unreg-event args))
+(defn append-interceptor! [& args] (apply router/append-interceptor! args))
+(defn registry-snapshot [& args] (apply router/registry-snapshot args))
+(defn restore-registry! [& args] (apply router/restore-registry! args))
 
 ;; Built-in interceptors
 (def debug interceptor/debug)
 (def trim-v interceptor/trim-v)
 
 ;; Multimethod-based dispatch (open extension)
-(def register-handler! multi/register-handler!)
-(def remove-handler! multi/remove-handler!)
-(def dispatch-multi multi/dispatch-sync)
-(def handler-registered? multi/handler-registered?)
+(defn register-handler! [& args] (apply multi/register-handler! args))
+(defn remove-handler! [& args] (apply multi/remove-handler! args))
+(defn dispatch-multi [& args] (apply multi/dispatch-sync args))
+(defn handler-registered? [& args] (apply multi/handler-registered? args))
 
 ;; FSM workflow engine (L2 deterministic workflows)
-(def fsm-compile fsm/compile)
-(def fsm-run fsm/run)
-#?(:clj (def fsm-run-async fsm/run-async))
-(def fsm-step fsm/step)
+(defn fsm-compile [& args] (apply fsm/compile args))
+(defn fsm-run [& args] (apply fsm/run args))
+#?(:clj (defn fsm-run-async [& args] (apply fsm/run-async args)))
+(defn fsm-step [& args] (apply fsm/step args))
 
 ;; FSM sub-FSM composition (nested workflows)
-(def fsm-run-sub fsm/run-sub-fsm)
-(def fsm-run-sub-fx fsm/run-sub-fsm-fx)
-(def fsm-sub-error? fsm/sub-fsm-error?)
-(def fsm-make-sub-handler fsm/make-sub-fsm-handler)
+(defn fsm-run-sub [& args] (apply fsm/run-sub-fsm args))
+(defn fsm-run-sub-fx [& args] (apply fsm/run-sub-fsm-fx args))
+(defn fsm-sub-error? [& args] (apply fsm/sub-fsm-error? args))
+(defn fsm-make-sub-handler [& args] (apply fsm/make-sub-fsm-handler args))
 
 ;; Logging configuration
-(def set-log-fn! log/set-log-fn!)
+(defn set-log-fn! [& args] (apply log/set-log-fn! args))
 
 ;; ============================================================================
 ;; Reload staleness
 ;; ============================================================================
 
-(def stale-registrations staleness/stale-entries)
+(defn stale-registrations [& args] (apply staleness/stale-entries args))
