@@ -10,14 +10,15 @@
    unresolvable — cljs, or hive-spi absent — the interceptor is a pass-through, so
    registration never fails and the module stays platform-safe."
   (:require [hive.events.router :as router]
-            [hive.events.interceptor :as interceptor]))
+            [hive.events.interceptor :as interceptor]
+            #_:clj-kondo/ignore
+            [hive-dsl.result :as r]))
 
 (defn- resolve-compile-op
   "The clj-only hive-spi.schema.derive/compile-op, or nil (cljs, or hive-spi
    absent). requiring-resolve THROWS on an absent ns, so it is guarded."
   []
-  #?(:clj  (try (requiring-resolve 'hive-spi.schema.derive/compile-op)
-                (catch Throwable _ nil))
+  #?(:clj  (r/rescue nil (requiring-resolve 'hive-spi.schema.derive/compile-op))
      :cljs nil))
 
 (defn coerce-event-interceptor
